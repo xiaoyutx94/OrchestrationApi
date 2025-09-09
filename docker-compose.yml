@@ -1,7 +1,7 @@
 # 生产环境的docker-compose配置覆盖文件
 services:
   orchestration-api:
-    image: orchestration-api:latest
+    image: ghcr.io/xiaoyutx94/orchestrationapi:latest
     container_name: orchestration-api
     ports:
       - "5000:5000"
