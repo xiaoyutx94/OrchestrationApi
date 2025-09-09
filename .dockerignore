@@ -1,0 +1,125 @@
+# 构建输出文件夹
+bin/
+obj/
+Debug/
+Release/
+x64/
+x86/
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+[Ww][Ii][Nn]32/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Bb]in/
+[Oo]bj/
+
+# 日志文件和数据文件夹
+logs/
+[Ll]og/
+[Ll]ogs/
+*.log
+*.db
+[Dd]ata/
+
+# 开发环境配置文件
+appsettings.Development.json
+appsettings.Production.json
+
+# IDE 和编辑器文件
+.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.userprefs
+
+# 版本控制
+.git/
+.gitignore
+.gitattributes
+
+# 文档和说明文件
+*.md
+README*
+CHANGELOG*
+LICENSE*
+CLAUDE.md
+
+# 测试相关
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+*.VisualState.xml
+TestResult.xml
+nunit-*.xml
+coverage*.json
+coverage*.xml
+coverage*.info
+*.coverage
+*.coveragexml
+
+# 临时文件
+*.tmp
+*.temp
+*~
+*.swp
+*.swo
+
+# Visual Studio 相关文件
+*.vspscc
+*.vssscc
+.builds
+*.pidb
+*.svclog
+*.scc
+*.psess
+*.vsp
+*.vspx
+*.sap
+
+# NuGet 包文件夹
+packages/
+*.nupkg
+*.snupkg
+
+# 构建工具文件
+*.DotSettings
+*.DotSettings.user
+StyleCopReport.xml
+
+# 其他开发工具文件
+.fake/
+.cr/personal
+*.tss
+*.jmconfig
+FodyWeavers.xsd
+.ionide/
+.history/
+.localhistory/
+.vshistory/
+
+# Docker 相关文件
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# 压缩文件和其他不需要的文件
+*.zip
+*.rar
+*.7z
+*.tar
+*.gz
+
+# 特定的文件夹
+.playwright-mcp/
+.claude/
+
+# Node.js (如果有前端依赖)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

@@ -1,0 +1,21 @@
+# 生产环境的docker-compose配置覆盖文件
+services:
+  orchestration-api:
+    image: orchestration-api:latest
+    container_name: orchestration-api
+    ports:
+      - "5000:5000"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - OrchestrationApi__Database__Type=sqlite
+      - OrchestrationApi__Database__ConnectionString=Data Source=/app/data/orchestration_api.db
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s

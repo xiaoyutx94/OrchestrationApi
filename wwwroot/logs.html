@@ -1,0 +1,2260 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OrchestrationApi - 请求日志</title>
+
+    <!-- Favicon 配置 - 添加版本号防止缓存 -->
+    <link rel="icon" href="/favicon.png?v=2" type="image/png">
+    <link rel="shortcut icon" href="/favicon.ico?v=2" type="image/x-icon">
+    <link rel="apple-touch-icon" href="/favicon.png?v=2" />
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <!-- 升级到最新版本的图表库 -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+    <script
+        src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+    <script
+        src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+
+    <style>
+        /* 自定义样式 */
+        .chart-container {
+            position: relative;
+            height: 300px;
+            width: 100%;
+        }
+
+        .chart-loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 10;
+        }
+
+        .chart-toolbar {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 20;
+            display: flex;
+            gap: 8px;
+        }
+
+        .chart-toolbar button {
+            background: rgba(255, 255, 255, 0.9);
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            padding: 6px 8px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .chart-toolbar button:hover {
+            background: rgba(255, 255, 255, 1);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .chart-fullscreen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: white;
+            z-index: 9999;
+            padding: 20px;
+        }
+
+        .chart-fullscreen .chart-container {
+            height: calc(100vh - 80px);
+        }
+
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            .chart-container {
+                height: 250px;
+            }
+
+            .chart-toolbar {
+                position: static;
+                justify-content: center;
+                margin-bottom: 10px;
+            }
+        }
+
+        @media (max-width: 640px) {
+            .chart-container {
+                height: 200px;
+            }
+        }
+
+        /* 无障碍访问性 */
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
+
+        /* 动画效果 */
+        .fade-in {
+            animation: fadeIn 0.5s ease-in;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* 加载动画 */
+        .loading-spinner {
+            border: 3px solid #f3f4f6;
+            border-top: 3px solid #3b82f6;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+</head>
+
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8" x-data="logsManagement()">
+        <!-- Header -->
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">
+            <div>
+                <h1 class="text-3xl font-bold text-gray-800">请求日志</h1>
+                <p class="text-gray-600">查看和分析API请求日志</p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+                <a href="/dashboard"
+                    class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-lg transition duration-200">
+                    返回仪表板
+                </a>
+                <button @click="refreshLogs()"
+                    class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg transition duration-200">
+                    刷新数据
+                </button>
+                <button @click="toggleAutoRefresh()"
+                    :class="autoRefresh ? 'bg-green-500 hover:bg-green-600' : 'bg-gray-500 hover:bg-gray-600'"
+                    class="text-white px-4 py-2 rounded-lg transition duration-200">
+                    <span x-text="autoRefresh ? '自动刷新: 开' : '自动刷新: 关'"></span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Real-time Status Indicator -->
+        <div x-show="autoRefresh"
+            class="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg flex items-center gap-2">
+            <div class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+            <span class="text-green-700 text-sm">实时更新已启用 - 下次更新: <span x-text="nextUpdateCountdown"></span>秒</span>
+        </div>
+
+        <!-- Total Tokens Stats -->
+        <!-- <div class="bg-white rounded-lg shadow-md p-6 mb-8 fade-in">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold text-gray-800">Token使用统计</h2>
+                <div class="flex gap-2">
+                    <button @click="refreshTokenStats()" class="bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded text-sm transition duration-200">
+                        刷新Token统计
+                    </button>
+                    <button @click="exportTokenStats()" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm transition duration-200">
+                        导出统计
+                    </button>
+                </div>
+            </div>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div class="text-center p-4 bg-blue-50 rounded-lg">
+                    <div class="text-2xl font-bold text-blue-600" x-text="totalTokensUsed.toLocaleString()"></div>
+                    <div class="text-sm text-gray-600">总Token数</div>
+                    <div class="text-xs text-gray-500 mt-1" x-text="getTokenTrend('total')"></div>
+                </div>
+                <div class="text-center p-4 bg-green-50 rounded-lg">
+                    <div class="text-2xl font-bold text-green-600" x-text="successTokensUsed.toLocaleString()"></div>
+                    <div class="text-sm text-gray-600">成功Token数</div>
+                    <div class="text-xs text-gray-500 mt-1" x-text="getTokenTrend('success')"></div>
+                </div>
+                <div class="text-center p-4 bg-purple-50 rounded-lg">
+                    <div class="text-2xl font-bold text-purple-600" x-text="avgTokensPerRequest"></div>
+                    <div class="text-sm text-gray-600">平均Token/请求</div>
+                    <div class="text-xs text-gray-500 mt-1" x-text="getTokenTrend('avg')"></div>
+                </div>
+                <div class="text-center p-4 bg-orange-50 rounded-lg">
+                    <div class="text-2xl font-bold text-orange-600" x-text="tokenSuccessRate + '%'"></div>
+                    <div class="text-sm text-gray-600">成功率</div>
+                    <div class="text-xs text-gray-500 mt-1" x-text="getTokenTrend('rate')"></div>
+                </div>
+            </div>
+        </div> -->
+
+        <!-- Stats Cards -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6 mb-8">
+            <div class="bg-white rounded-lg shadow-md p-4 md:p-6 fade-in">
+                <div class="flex items-center">
+                    <div class="p-2 bg-blue-100 rounded-lg">
+                        <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                            aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z">
+                            </path>
+                        </svg>
+                    </div>
+                    <div class="ml-4">
+                        <p class="text-sm font-medium text-gray-600">总请求数</p>
+                        <p class="text-xl md:text-2xl font-semibold text-gray-900" x-text="totalRequests"></p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-lg shadow-md p-4 md:p-6 fade-in">
+                <div class="flex items-center">
+                    <div class="p-2 bg-green-100 rounded-lg">
+                        <svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                            aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                    </div>
+                    <div class="ml-4">
+                        <p class="text-sm font-medium text-gray-600">成功请求</p>
+                        <p class="text-xl md:text-2xl font-semibold text-gray-900" x-text="successRequests"></p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-lg shadow-md p-4 md:p-6 fade-in">
+                <div class="flex items-center">
+                    <div class="p-2 bg-red-100 rounded-lg">
+                        <svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                            aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                    </div>
+                    <div class="ml-4">
+                        <p class="text-sm font-medium text-gray-600">失败请求</p>
+                        <p class="text-xl md:text-2xl font-semibold text-gray-900" x-text="errorRequests"></p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-lg shadow-md p-4 md:p-6 fade-in">
+                <div class="flex items-center">
+                    <div class="p-2 bg-purple-100 rounded-lg">
+                        <svg class="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                            aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                        </svg>
+                    </div>
+                    <div class="ml-4">
+                        <p class="text-sm font-medium text-gray-600">平均响应时间</p>
+                        <p class="text-xl md:text-2xl font-semibold text-gray-900" x-text="avgResponseTime + 'ms'"></p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Advanced Charts Section -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-8 fade-in" id="charts-section">
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
+                <h2 class="text-xl font-bold text-gray-800">数据可视化</h2>
+                <div class="flex flex-wrap gap-2">
+                    <select x-model="chartTimeRange" @change="updateChartsWithTimeRange()"
+                        class="px-3 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="">全部</option>
+                        <option value="1h">最近1小时</option>
+                        <option value="6h">最近6小时</option>
+                        <option value="24h">最近24小时</option>
+                        <option value="7d">最近7天</option>
+                        <option value="30d">最近30天</option>
+                    </select>
+                    <button @click="exportAllCharts()"
+                        class="bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded text-sm transition duration-200">
+                        导出图表
+                    </button>
+                    <button @click="resetAllCharts()"
+                        class="bg-gray-500 hover:bg-gray-600 text-white px-3 py-1 rounded text-sm transition duration-200">
+                        重置缩放
+                    </button>
+                </div>
+            </div>
+
+            <!-- 第一行图表 -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+                <!-- 请求状态分布饼图 -->
+                <div class="bg-gray-50 rounded-lg p-4 relative">
+                    <div class="chart-toolbar">
+                        <button @click="exportChart('statusChart')" title="导出图表" aria-label="导出状态分布图表">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z">
+                                </path>
+                            </svg>
+                        </button>
+                        <button @click="toggleFullscreen('statusChart')" title="全屏显示" aria-label="全屏显示状态分布图表">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4">
+                                </path>
+                            </svg>
+                        </button>
+                    </div>
+                    <h3 class="text-lg font-semibold mb-4 text-center text-gray-700">请求状态分布</h3>
+                    <div class="chart-container">
+                        <div x-show="chartsLoading.status" class="chart-loading">
+                            <div class="loading-spinner"></div>
+                        </div>
+                        <canvas id="statusChart" role="img" aria-label="请求状态分布饼图"></canvas>
+                    </div>
+                    <div class="sr-only" id="statusChart-description">
+                        显示成功请求和失败请求的比例分布
+                    </div>
+                </div>
+
+                <!-- 模型使用统计柱状图 -->
+                <div class="bg-gray-50 rounded-lg p-4 relative">
+                    <div class="chart-toolbar">
+                        <button @click="exportChart('modelChart')" title="导出图表" aria-label="导出模型使用统计图表">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z">
+                                </path>
+                            </svg>
+                        </button>
+                        <button @click="toggleFullscreen('modelChart')" title="全屏显示" aria-label="全屏显示模型使用统计图表">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4">
+                                </path>
+                            </svg>
+                        </button>
+                    </div>
+                    <h3 class="text-lg font-semibold mb-4 text-center text-gray-700">模型使用统计</h3>
+                    <div class="chart-container">
+                        <div x-show="chartsLoading.model" class="chart-loading">
+                            <div class="loading-spinner"></div>
+                        </div>
+                        <canvas id="modelChart" role="img" aria-label="模型使用统计柱状图"></canvas>
+                    </div>
+                    <div class="sr-only" id="modelChart-description">
+                        显示各个AI模型的使用频次统计
+                    </div>
+                </div>
+            </div>
+
+            <!-- 第二行图表 -->
+            <!-- <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div class="bg-gray-50 rounded-lg p-4 relative">
+                    <div class="chart-toolbar">
+                        <button @click="exportChart('tokenTrendChart')" title="导出图表" aria-label="导出Token使用趋势图表">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                            </svg>
+                        </button>
+                        <button @click="toggleFullscreen('tokenTrendChart')" title="全屏显示" aria-label="全屏显示Token使用趋势图表">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"></path>
+                            </svg>
+                        </button>
+                    </div>
+                    <h3 class="text-lg font-semibold mb-4 text-center text-gray-700">Token使用趋势</h3>
+                    <div class="chart-container">
+                        <div x-show="chartsLoading.tokenTrend" class="chart-loading">
+                            <div class="loading-spinner"></div>
+                        </div>
+                        <canvas id="tokenTrendChart" role="img" aria-label="Token使用趋势折线图"></canvas>
+                    </div>
+                    <div class="sr-only" id="tokenTrendChart-description">
+                        显示Token使用量随时间的变化趋势
+                    </div>
+                </div>
+                <div class="bg-gray-50 rounded-lg p-4 relative">
+                    <div class="chart-toolbar">
+                        <button @click="exportChart('groupTokenChart')" title="导出图表" aria-label="导出分组Token统计图表">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                            </svg>
+                        </button>
+                        <button @click="toggleFullscreen('groupTokenChart')" title="全屏显示" aria-label="全屏显示分组Token统计图表">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"></path>
+                            </svg>
+                        </button>
+                    </div>
+                    <h3 class="text-lg font-semibold mb-4 text-center text-gray-700">各分组Token数统计</h3>
+                    <div class="chart-container">
+                        <div x-show="chartsLoading.groupToken" class="chart-loading">
+                            <div class="loading-spinner"></div>
+                        </div>
+                        <canvas id="groupTokenChart" role="img" aria-label="各分组Token数统计柱状图"></canvas>
+                    </div>
+                    <div class="sr-only" id="groupTokenChart-description">
+                        显示各个服务商分组的Token使用量统计
+                    </div>
+                </div>
+            </div> -->
+        </div>
+
+        <!-- Filters -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-8 fade-in">
+            <h2 class="text-xl font-bold mb-4">筛选条件</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">代理密钥</label>
+                    <select x-model="filters.proxyKeyName" @change="applyFilters()"
+                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="">所有密钥</option>
+                        <template x-for="key in proxyKeys" :key="key">
+                            <option :value="key" x-text="key"></option>
+                        </template>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">分组</label>
+                    <select x-model="filters.providerGroup" @change="applyFilters()"
+                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="">所有分组</option>
+                        <template x-for="group in providerGroups" :key="group">
+                            <option :value="group" x-text="group"></option>
+                        </template>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">模型</label>
+                    <select x-model="filters.model" @change="applyFilters()"
+                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="">所有模型</option>
+                        <template x-for="model in models" :key="model">
+                            <option :value="model" x-text="model"></option>
+                        </template>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">状态</label>
+                    <select x-model="filters.status" @change="applyFilters()"
+                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="">所有状态</option>
+                        <option value="200">成功 (200)</option>
+                        <option value="error">错误 (非200)</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">请求类型</label>
+                    <select x-model="filters.stream" @change="applyFilters()"
+                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="">所有类型</option>
+                        <option value="true">流式</option>
+                        <option value="false">非流式</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <!-- Logs Table -->
+        <div class="bg-white rounded-lg shadow-md p-6 fade-in">
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
+                <h2 class="text-xl font-bold">请求日志</h2>
+                <div class="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full sm:w-auto">
+                    <!-- 批量操作按钮 -->
+                    <div x-show="selectedLogs.length > 0" class="flex items-center gap-2">
+                        <span class="text-sm text-gray-600">已选择 <span x-text="selectedLogs.length"></span> 条</span>
+                        <button @click="deleteSelectedLogs()"
+                            class="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded text-sm transition duration-200">
+                            删除选中
+                        </button>
+                    </div>
+                    <!-- 导出和清空按钮 -->
+                    <div class="flex items-center gap-2">
+                        <button @click="exportLogs()"
+                            class="bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded text-sm transition duration-200">
+                            导出日志
+                        </button>
+                        <button @click="clearErrorLogs()"
+                            class="bg-orange-500 hover:bg-orange-600 text-white px-3 py-1 rounded text-sm transition duration-200">
+                            清空错误日志
+                        </button>
+                        <button @click="clearAllLogs()"
+                            class="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-sm transition duration-200">
+                            清空所有
+                        </button>
+                    </div>
+                    <div class="text-sm text-gray-600">
+                        共 <span x-text="totalCount"></span> 条记录
+                    </div>
+                </div>
+            </div>
+
+            <div class="overflow-x-auto">
+                <table class="min-w-full table-auto">
+                    <thead>
+                        <tr class="bg-gray-50">
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                <input type="checkbox" @change="toggleSelectAll()" :checked="isAllSelected()"
+                                    class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                            </th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                时间</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                代理密钥</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                分组</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                模型</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                状态</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                类型</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                响应时间</th>
+                            <!-- <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Token数</th> -->
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                客户端IP</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                操作</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                错误</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">
+                        <template x-for="log in logs" :key="log.id">
+                            <tr class="hover:bg-gray-50 transition-colors duration-150">
+                                <td class="px-4 py-4 whitespace-nowrap">
+                                    <input type="checkbox" :value="log.id" @change="toggleLogSelection(log.id)"
+                                        :checked="selectedLogs.includes(log.id)"
+                                        class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                                </td>
+                                <td class="px-4 py-4 whitespace-nowrap text-sm text-gray-900"
+                                    x-text="formatDate(log.created_at)"></td>
+                                <td class="px-4 py-4 whitespace-nowrap text-sm text-gray-900"
+                                    x-text="log.proxy_key_name || 'Unknown'"></td>
+                                <td class="px-4 py-4 whitespace-nowrap">
+                                    <span
+                                        class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800"
+                                        x-text="log.provider_group || '-'"></span>
+                                </td>
+                                <td class="px-4 py-4 whitespace-nowrap text-sm text-gray-900" x-text="log.model"></td>
+                                <td class="px-4 py-4 whitespace-nowrap">
+                                    <span
+                                        :class="log.status_code === 200 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'"
+                                        class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
+                                        x-text="log.status_code"></span>
+                                </td>
+                                <td class="px-4 py-4 whitespace-nowrap">
+                                    <span
+                                        :class="log.is_stream ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800'"
+                                        class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
+                                        x-text="log.is_stream ? '流式' : '普通'"></span>
+                                </td>
+                                <td class="px-4 py-4 whitespace-nowrap text-sm text-gray-900"
+                                    x-text="(log.duration || 0) + 'ms'"></td>
+                                <!-- <td class="px-4 py-4 whitespace-nowrap text-sm text-gray-900">
+                                    <div class="flex items-center space-x-1">
+                                        <span x-text="log.tokens_used || '-'"></span>
+                                        <span x-show="log.tokens_estimated"
+                                            class="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800"
+                                            title="使用备用估算方法计算的Token数">
+                                            估算
+                                        </span>
+                                    </div>
+                                </td> -->
+                                <td class="px-4 py-4 whitespace-nowrap text-sm text-gray-900"
+                                    x-text="log.client_ip || '-'"></td>
+                                <td class="px-4 py-4 whitespace-nowrap text-sm font-medium">
+                                    <button @click="viewLogDetail(log.id)"
+                                        class="text-indigo-600 hover:text-indigo-900 transition-colors duration-150">查看详情</button>
+                                </td>
+                                <td class="px-4 py-4 whitespace-nowrap text-sm text-red-600 max-w-xs truncate"
+                                    :title="log.error" x-text="log.error || '-'"></td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Pagination -->
+            <div class="mt-6 flex flex-col sm:flex-row justify-between items-center gap-4">
+                <div class="text-sm text-gray-700">
+                    显示 <span x-text="(currentPage - 1) * pageSize + 1"></span> 到 <span
+                        x-text="Math.min(currentPage * pageSize, totalCount)"></span> 条，共 <span
+                        x-text="totalCount"></span> 条记录
+                </div>
+                <div class="flex space-x-2">
+                    <button @click="previousPage()" :disabled="currentPage === 1"
+                        class="px-3 py-1 border border-gray-300 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors duration-150">
+                        上一页
+                    </button>
+                    <span class="px-3 py-1 bg-blue-500 text-white rounded-lg" x-text="currentPage"></span>
+                    <button @click="nextPage()" :disabled="currentPage >= totalPages"
+                        class="px-3 py-1 border border-gray-300 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors duration-150">
+                        下一页
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Log Detail Modal -->
+        <div x-show="showDetailModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50"
+            x-cloak>
+            <div class="relative top-10 mx-auto p-5 border w-11/12 max-w-4xl shadow-lg rounded-md bg-white">
+                <div class="mt-3">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-lg font-medium text-gray-900">请求详情</h3>
+                        <button @click="showDetailModal = false"
+                            class="text-gray-400 hover:text-gray-600 transition-colors duration-150">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
+                        </button>
+                    </div>
+
+                    <div x-show="logDetail" class="space-y-6">
+                        <!-- Basic Info -->
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700">请求时间</label>
+                                <p class="mt-1 text-sm text-gray-900"
+                                    x-text="logDetail ? formatDate(logDetail.created_at) : ''"></p>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700">代理密钥</label>
+                                <div class="mt-1">
+                                    <p class="text-sm font-medium text-gray-900"
+                                        x-text="logDetail ? logDetail.proxy_key_name : ''"></p>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700">服务商分组</label>
+                                <p class="mt-1 text-sm text-gray-900"
+                                    x-text="logDetail ? logDetail.provider_group : ''"></p>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700">API_KEY</label>
+                                <p class="mt-1 text-sm text-gray-900 font-mono break-all"
+                                    x-text="logDetail ? logDetail.openrouter_key : ''"></p>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700">模型</label>
+                                <p class="mt-1 text-sm text-gray-900" x-text="logDetail ? logDetail.model : ''"></p>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700">状态码</label>
+                                <p class="mt-1 text-sm"
+                                    :class="logDetail && logDetail.status_code === 200 ? 'text-green-600' : 'text-red-600'"
+                                    x-text="logDetail ? logDetail.status_code : ''"></p>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700">请求类型</label>
+                                <p class="mt-1 text-sm text-gray-900"
+                                    x-text="logDetail ? (logDetail.is_stream ? '流式' : '普通') : ''"></p>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700">响应时间</label>
+                                <p class="mt-1 text-sm text-gray-900"
+                                    x-text="logDetail ? (logDetail.duration || 0) + 'ms' : ''"></p>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700">Token使用量</label>
+                                <div class="mt-1 flex items-center space-x-2">
+                                    <p class="text-sm text-gray-900"
+                                        x-text="logDetail ? (logDetail.tokens_used || '未知') : ''"></p>
+                                    <span x-show="logDetail && logDetail.tokens_estimated"
+                                        class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800"
+                                        title="使用备用估算方法计算的Token数">
+                                        备用估算
+                                    </span>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700">客户端IP</label>
+                                <p class="mt-1 text-sm text-gray-900"
+                                    x-text="logDetail ? (logDetail.client_ip || '未知') : ''"></p>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700">错误信息</label>
+                                <p class="mt-1 text-sm text-red-600" x-text="logDetail ? (logDetail.error || '无') : ''">
+                                </p>
+                            </div>
+                        </div>
+
+                        <!-- Request Body -->
+                        <!-- <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">请求内容</label>
+                            <div class="bg-gray-50 rounded-lg p-4 max-h-64 overflow-y-auto">
+                                <pre class="text-sm text-gray-900 whitespace-pre-wrap" x-text="logDetail ? formatJSON(logDetail.request_body) : ''"></pre>
+                            </div>
+                        </div> -->
+
+                        <!-- Response Body -->
+                        <!-- <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">响应内容</label>
+                            <div class="bg-gray-50 rounded-lg p-4 max-h-64 overflow-y-auto">
+                                <pre class="text-sm text-gray-900 whitespace-pre-wrap" x-text="logDetail ? formatResponse(logDetail.response_body) : ''"></pre>
+                            </div>
+                        </div> -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+
+        <!-- Fullscreen Chart Modal -->
+        <div x-show="fullscreenChart" class="chart-fullscreen" x-cloak>
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold" x-text="fullscreenChartTitle"></h3>
+                <button @click="exitFullscreen()"
+                    class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-lg transition duration-200">
+                    退出全屏
+                </button>
+            </div>
+            <div class="chart-container">
+                <canvas id="fullscreenChart" role="img" aria-label="全屏图表"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- 自定义确认框模态 -->
+    <div id="confirmModal"
+        class="fixed inset-0 bg-gray-900 bg-opacity-50 overflow-y-auto h-full w-full z-50 hidden modal-backdrop">
+        <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-lg bg-white modal-animation">
+            <div class="mt-3 text-center">
+                <div class="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100">
+                    <svg class="h-6 w-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16c-.77.833.192 2.5 1.732 2.5z">
+                        </path>
+                    </svg>
+                </div>
+                <h3 class="text-lg leading-6 font-medium text-gray-900 mt-2">确认操作</h3>
+                <div class="mt-2 px-7 py-3">
+                    <p class="text-sm text-gray-500 whitespace-pre-line" id="confirmMessage"></p>
+                </div>
+                <div class="items-center px-4 py-3 space-x-2">
+                    <button id="confirmYes"
+                        class="px-4 py-2 bg-red-500 text-white text-base font-medium rounded-md w-20 hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-red-300 transition-colors">
+                        确定
+                    </button>
+                    <button id="confirmNo"
+                        class="px-4 py-2 bg-gray-500 text-white text-base font-medium rounded-md w-20 hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-300 transition-colors">
+                        取消
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 自定义提示框模态 -->
+    <div id="alertModal"
+        class="fixed inset-0 bg-gray-900 bg-opacity-50 overflow-y-auto h-full w-full z-50 hidden modal-backdrop">
+        <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-lg bg-white modal-animation">
+            <div class="mt-3 text-center">
+                <div class="mx-auto flex items-center justify-center h-12 w-12 rounded-full" id="alertIcon">
+                    <!-- 图标将通过 JavaScript 动态设置 -->
+                </div>
+                <h3 class="text-lg leading-6 font-medium text-gray-900 mt-2" id="alertTitle">提示</h3>
+                <div class="mt-2 px-7 py-3">
+                    <p class="text-sm text-gray-600 whitespace-pre-line" id="alertMessage"></p>
+                </div>
+                <div class="items-center px-4 py-3">
+                    <button id="alertOk"
+                        class="px-4 py-2 bg-blue-500 text-white text-base font-medium rounded-md w-20 hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-300 transition-colors">
+                        确定
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 自定义确认框函数
+        function showConfirm(message, title = '确认操作') {
+            return new Promise((resolve) => {
+                const modal = document.getElementById('confirmModal');
+                const messageEl = document.getElementById('confirmMessage');
+                const titleEl = modal.querySelector('h3');
+                const yesBtn = document.getElementById('confirmYes');
+                const noBtn = document.getElementById('confirmNo');
+
+                messageEl.textContent = message;
+                titleEl.textContent = title;
+                modal.classList.remove('hidden');
+
+                // 添加淡入动画
+                setTimeout(() => {
+                    modal.querySelector('.relative').style.transform = 'scale(1)';
+                    modal.querySelector('.relative').style.opacity = '1';
+                }, 10);
+
+                const handleYes = () => {
+                    modal.classList.add('hidden');
+                    yesBtn.removeEventListener('click', handleYes);
+                    noBtn.removeEventListener('click', handleNo);
+                    document.removeEventListener('keydown', handleKeydown);
+                    resolve(true);
+                };
+
+                const handleNo = () => {
+                    modal.classList.add('hidden');
+                    yesBtn.removeEventListener('click', handleYes);
+                    noBtn.removeEventListener('click', handleNo);
+                    document.removeEventListener('keydown', handleKeydown);
+                    resolve(false);
+                };
+
+                const handleKeydown = (e) => {
+                    if (e.key === 'Enter') {
+                        handleYes();
+                    } else if (e.key === 'Escape') {
+                        handleNo();
+                    }
+                };
+
+                yesBtn.addEventListener('click', handleYes);
+                noBtn.addEventListener('click', handleNo);
+                document.addEventListener('keydown', handleKeydown);
+
+                // 点击遮罩关闭
+                modal.addEventListener('click', (e) => {
+                    if (e.target === modal) {
+                        handleNo();
+                    }
+                });
+            });
+        }
+
+        // 自定义提示框函数
+        function showAlert(message, type = 'info', title = '提示') {
+            return new Promise((resolve) => {
+                const modal = document.getElementById('alertModal');
+                const messageEl = document.getElementById('alertMessage');
+                const titleEl = document.getElementById('alertTitle');
+                const iconEl = document.getElementById('alertIcon');
+                const okBtn = document.getElementById('alertOk');
+
+                messageEl.textContent = message;
+                titleEl.textContent = title;
+
+                // 根据类型设置图标和颜色
+                let iconHTML = '';
+                let buttonClass = 'bg-blue-500 hover:bg-blue-600 focus:ring-blue-300';
+
+                switch (type) {
+                    case 'success':
+                        iconHTML = `
+                            <div class="bg-green-100 rounded-full p-3">
+                                <svg class="h-6 w-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                                </svg>
+                            </div>`;
+                        buttonClass = 'bg-green-500 hover:bg-green-600 focus:ring-green-300';
+                        break;
+                    case 'error':
+                        iconHTML = `
+                            <div class="bg-red-100 rounded-full p-3">
+                                <svg class="h-6 w-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                </svg>
+                            </div>`;
+                        buttonClass = 'bg-red-500 hover:bg-red-600 focus:ring-red-300';
+                        break;
+                    case 'warning':
+                        iconHTML = `
+                            <div class="bg-yellow-100 rounded-full p-3">
+                                <svg class="h-6 w-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16c-.77.833.192 2.5 1.732 2.5z"></path>
+                                </svg>
+                            </div>`;
+                        buttonClass = 'bg-yellow-500 hover:bg-yellow-600 focus:ring-yellow-300';
+                        break;
+                    default: // info
+                        iconHTML = `
+                            <div class="bg-blue-100 rounded-full p-3">
+                                <svg class="h-6 w-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                            </div>`;
+                }
+
+                iconEl.innerHTML = iconHTML;
+                okBtn.className = `px-4 py-2 text-white text-base font-medium rounded-md w-20 focus:outline-none transition-colors ${buttonClass}`;
+
+                modal.classList.remove('hidden');
+
+                // 添加淡入动画
+                setTimeout(() => {
+                    modal.querySelector('.relative').style.transform = 'scale(1)';
+                    modal.querySelector('.relative').style.opacity = '1';
+                }, 10);
+
+                const handleOk = () => {
+                    modal.classList.add('hidden');
+                    okBtn.removeEventListener('click', handleOk);
+                    document.removeEventListener('keydown', handleKeydown);
+                    resolve();
+                };
+
+                const handleKeydown = (e) => {
+                    if (e.key === 'Enter' || e.key === 'Escape') {
+                        handleOk();
+                    }
+                };
+
+                okBtn.addEventListener('click', handleOk);
+                document.addEventListener('keydown', handleKeydown);
+
+                // 点击遮罩关闭
+                modal.addEventListener('click', (e) => {
+                    if (e.target === modal) {
+                        handleOk();
+                    }
+                });
+            });
+        }
+
+
+        function logsManagement() {
+            return {
+                logs: [],
+                logDetail: null,
+                showDetailModal: false,
+                selectedLogs: [],
+                currentPage: 1,
+                pageSize: 20,
+                totalCount: 0,
+                totalRequests: 0,
+                successRequests: 0,
+                errorRequests: 0,
+                avgResponseTime: 0,
+                totalTokensUsed: 0,
+                successTokensUsed: 0,
+                avgTokensPerRequest: 0,
+                tokenSuccessRate: 0,
+                proxyKeys: [],
+                providerGroups: [],
+                models: [],
+                filters: {
+                    proxyKeyName: '',
+                    providerGroup: '',
+                    model: '',
+                    status: '',
+                    stream: ''
+                },
+
+                // 新增功能
+                autoRefresh: false,
+                refreshInterval: null,
+                nextUpdateCountdown: 30,
+                countdownInterval: null,
+                chartTimeRange: '',
+                chartsLoading: {
+                    status: false,
+                    model: false,
+                    tokenTrend: false,
+                    groupToken: false
+                },
+                fullscreenChart: false,
+                fullscreenChartTitle: '',
+                fullscreenChartContent: '',
+                previousStats: {
+                    totalTokensUsed: 0,
+                    successTokensUsed: 0,
+                    avgTokensPerRequest: 0,
+                    tokenSuccessRate: 0
+                },
+
+                async init() {
+                    await this.loadLogs();
+                    await this.loadStats();
+                    await this.loadTokenStats();
+                    // 延迟初始化图表，确保数据已加载和DOM已渲染
+                    setTimeout(() => {
+                        this.initCharts();
+                    }, 500);
+                },
+
+                get totalPages() {
+                    return Math.ceil(this.totalCount / this.pageSize);
+                },
+
+                async loadLogs() {
+                    try {
+                        const params = new URLSearchParams({
+                            limit: this.pageSize,
+                            offset: (this.currentPage - 1) * this.pageSize
+                        });
+
+                        if (this.filters.proxyKeyName) params.append('proxy_key_name', this.filters.proxyKeyName);
+                        if (this.filters.providerGroup) params.append('provider_group', this.filters.providerGroup);
+                        if (this.filters.model) params.append('model', this.filters.model);
+                        if (this.filters.status) params.append('status', this.filters.status);
+                        if (this.filters.stream) params.append('stream', this.filters.stream);
+
+                        const response = await fetch(`/admin/logs?${params}`);
+                        const data = await response.json();
+
+                        if (data.success) {
+                            this.logs = data.logs || [];
+                            this.totalCount = data.total_count || 0;
+                            this.selectedLogs = []; // 清空选中状态
+                            this.extractFilters();
+                        } else {
+                            console.error('Failed to load logs:', data.error);
+                        }
+                    } catch (error) {
+                        console.error('Error loading logs:', error);
+                    }
+                },
+
+                async loadStats() {
+                    try {
+                        const [proxyKeyStatsResponse, modelStatsResponse] = await Promise.all([
+                            fetch('/admin/logs/stats/api-keys'),
+                            fetch('/admin/logs/stats/models')
+                        ]);
+
+                        const proxyKeyStats = await proxyKeyStatsResponse.json();
+                        const modelStats = await modelStatsResponse.json();
+
+                        if (proxyKeyStats.success) {
+                            const stats = proxyKeyStats.stats || [];
+                            this.totalRequests = stats.reduce((sum, stat) => sum + stat.total_requests, 0);
+                            this.successRequests = stats.reduce((sum, stat) => sum + stat.success_requests, 0);
+                            this.errorRequests = stats.reduce((sum, stat) => sum + stat.error_requests, 0);
+                            this.avgResponseTime = Math.round(stats.reduce((sum, stat) => sum + stat.avg_duration, 0) / stats.length) || 0;
+                        }
+                    } catch (error) {
+                        console.error('Error loading stats:', error);
+                    }
+                },
+
+                extractFilters() {
+                    const proxyKeys = new Set();
+                    const providerGroups = new Set();
+                    const models = new Set();
+
+                    this.logs.forEach(log => {
+                        if (log.proxy_key_name) {
+                            proxyKeys.add(log.proxy_key_name);
+                        }
+                        if (log.provider_group) {
+                            providerGroups.add(log.provider_group);
+                        }
+                        if (log.model) {
+                            models.add(log.model);
+                        }
+                    });
+
+                    this.proxyKeys = Array.from(proxyKeys).sort();
+                    this.providerGroups = Array.from(providerGroups).sort();
+                    this.models = Array.from(models).sort();
+                },
+
+                async applyFilters() {
+                    this.currentPage = 1;
+                    await this.loadLogs();
+                    // 筛选条件变化时也需要更新图表
+                    setTimeout(async () => {
+                        await this.updateCharts();
+                    }, 300);
+                },
+
+                async viewLogDetail(id) {
+                    try {
+                        const response = await fetch(`/admin/logs/${id}`);
+                        const data = await response.json();
+
+                        if (data.success) {
+                            this.logDetail = data.log;
+                            this.showDetailModal = true;
+                        } else {
+                            console.error('Failed to load log detail:', data.error);
+                        }
+                    } catch (error) {
+                        console.error('Error loading log detail:', error);
+                    }
+                },
+
+                async refreshLogs() {
+                    await this.loadLogs();
+                    await this.loadStats();
+                    //await this.loadTokenStats();
+                    // 延迟更新图表，确保数据已加载
+                    setTimeout(() => {
+                        this.updateCharts();
+                    }, 300);
+                },
+
+                async loadTokenStats() {
+                    try {
+                        // 保存之前的统计数据用于趋势计算
+                        this.previousStats = {
+                            totalTokensUsed: this.totalTokensUsed,
+                            successTokensUsed: this.successTokensUsed,
+                            avgTokensPerRequest: this.avgTokensPerRequest,
+                            tokenSuccessRate: this.tokenSuccessRate
+                        };
+
+                        const response = await fetch('/admin/logs/stats/tokens');
+                        const data = await response.json();
+
+                        if (data.success && data.stats) {
+                            this.totalTokensUsed = data.stats.total_tokens || 0;
+                            this.successTokensUsed = data.stats.success_tokens || 0;
+                            this.avgTokensPerRequest = data.stats.success_requests > 0 ?
+                                Math.round(this.successTokensUsed / data.stats.success_requests) : 0;
+                            this.tokenSuccessRate = data.stats.total_requests > 0 ?
+                                Math.round((data.stats.success_requests / data.stats.total_requests) * 100) : 0;
+                        }
+                    } catch (error) {
+                        console.error('Error loading token stats:', error);
+                    }
+                },
+
+                refreshTokenStats() {
+                    this.loadTokenStats();
+                },
+
+                // 获取Token趋势
+                getTokenTrend(type) {
+                    const current = this[type === 'total' ? 'totalTokensUsed' :
+                        type === 'success' ? 'successTokensUsed' :
+                            type === 'avg' ? 'avgTokensPerRequest' : 'tokenSuccessRate'];
+                    const previous = this.previousStats[type === 'total' ? 'totalTokensUsed' :
+                        type === 'success' ? 'successTokensUsed' :
+                            type === 'avg' ? 'avgTokensPerRequest' : 'tokenSuccessRate'];
+
+                    if (previous === 0) return '';
+
+                    const change = current - previous;
+                    const percentage = Math.abs(Math.round((change / previous) * 100));
+
+                    if (change > 0) {
+                        return `↗ +${percentage}%`;
+                    } else if (change < 0) {
+                        return `↘ -${percentage}%`;
+                    } else {
+                        return '→ 0%';
+                    }
+                },
+
+                // 实时更新功能
+                toggleAutoRefresh() {
+                    this.autoRefresh = !this.autoRefresh;
+
+                    if (this.autoRefresh) {
+                        this.startAutoRefresh();
+                    } else {
+                        this.stopAutoRefresh();
+                    }
+                },
+
+                startAutoRefresh() {
+                    this.nextUpdateCountdown = 30;
+
+                    // 开始倒计时
+                    this.countdownInterval = setInterval(() => {
+                        this.nextUpdateCountdown--;
+                        if (this.nextUpdateCountdown <= 0) {
+                            this.nextUpdateCountdown = 30;
+                        }
+                    }, 1000);
+
+                    // 开始自动刷新
+                    this.refreshInterval = setInterval(async () => {
+                        await this.refreshLogs();
+                    }, 30000);
+                },
+
+                stopAutoRefresh() {
+                    if (this.refreshInterval) {
+                        clearInterval(this.refreshInterval);
+                        this.refreshInterval = null;
+                    }
+                    if (this.countdownInterval) {
+                        clearInterval(this.countdownInterval);
+                        this.countdownInterval = null;
+                    }
+                },
+
+                previousPage() {
+                    if (this.currentPage > 1) {
+                        this.currentPage--;
+                        this.loadLogs();
+                    }
+                },
+
+                nextPage() {
+                    if (this.currentPage < this.totalPages) {
+                        this.currentPage++;
+                        this.loadLogs();
+                    }
+                },
+
+                formatDate(dateString) {
+                    if (!dateString) return '';
+                    const date = new Date(dateString);
+                    return date.toLocaleString('zh-CN');
+                },
+
+                formatJSON(jsonString) {
+                    if (!jsonString) return '';
+                    try {
+                        const obj = JSON.parse(jsonString);
+                        return JSON.stringify(obj, null, 2);
+                    } catch (e) {
+                        return jsonString;
+                    }
+                },
+
+                formatResponse(responseString) {
+                    if (!responseString) return '无响应内容';
+
+                    // 如果是流式响应，显示前几行
+                    if (responseString.includes('data: ')) {
+                        const lines = responseString.split('\n').slice(0, 10);
+                        return lines.join('\n') + (responseString.split('\n').length > 10 ? '\n...(更多内容)' : '');
+                    }
+
+                    // 尝试格式化JSON
+                    try {
+                        const obj = JSON.parse(responseString);
+                        return JSON.stringify(obj, null, 2);
+                    } catch (e) {
+                        return responseString;
+                    }
+                },
+
+                // 批量选择相关方法
+                toggleLogSelection(logId) {
+                    const index = this.selectedLogs.indexOf(logId);
+                    if (index > -1) {
+                        this.selectedLogs.splice(index, 1);
+                    } else {
+                        this.selectedLogs.push(logId);
+                    }
+                },
+
+                toggleSelectAll() {
+                    if (this.isAllSelected()) {
+                        this.selectedLogs = [];
+                    } else {
+                        this.selectedLogs = this.logs.map(log => log.id);
+                    }
+                },
+
+                isAllSelected() {
+                    return this.logs.length > 0 && this.selectedLogs.length === this.logs.length;
+                },
+
+                // 删除选中的日志
+                async deleteSelectedLogs() {
+                    if (this.selectedLogs.length === 0) {
+                        await showAlert('请先选择要删除的日志', 'warning', '提示');
+                        return;
+                    }
+
+                    const confirmed = await showConfirm(`确定要删除选中的 ${this.selectedLogs.length} 条日志吗？此操作不可撤销。`, '确认删除');
+                    if (confirmed) {
+                        await this.performDeleteSelected();
+                    }
+                },
+
+                async performDeleteSelected() {
+                    try {
+                        // 确保ID是数字类型
+                        const ids = this.selectedLogs.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+
+                        if (ids.length === 0) {
+                            await showAlert('没有有效的日志ID可删除', 'warning', '提示');
+                            return;
+                        }
+
+
+
+                        const response = await fetch('/admin/logs/batch', {
+                            method: 'DELETE',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({
+                                ids: ids
+                            })
+                        });
+
+                        const data = await response.json();
+
+                        if (data.success) {
+                            await showAlert(`成功删除 ${data.deleted_count} 条日志`, 'success', '提示');
+                            this.selectedLogs = [];
+                            this.loadLogs();
+                            this.loadStats();
+                        } else {
+                            await showAlert('删除失败: ' + data.error, 'error', '提示');
+                        }
+                    } catch (error) {
+                        console.error('Error deleting logs:', error);
+                        await showAlert('删除失败: ' + error.message, 'error', '提示');
+                    }
+                },
+
+                // 清空错误日志
+                async clearErrorLogs() {
+                    const confirmed = await showConfirm('确定要清空所有错误日志吗？此操作将删除所有状态码不为200的日志记录，不可撤销。', '确认清空错误日志');
+                    if (confirmed) {
+                        await this.performClearErrors();
+                    }
+                },
+
+                // 清空所有日志
+                async clearAllLogs() {
+                    const confirmed = await showConfirm('确定要清空所有日志吗？此操作将删除所有日志记录，不可撤销。', '确认清空');
+                    if (confirmed) {
+                        await this.performClearAll();
+                    }
+                },
+
+                async performClearAll() {
+                    try {
+                        const response = await fetch('/admin/logs/clear', {
+                            method: 'DELETE'
+                        });
+
+                        const data = await response.json();
+
+                        if (data.success) {
+                            await showAlert(`成功清空所有日志，删除了 ${data.deleted_count} 条记录`, 'success', '提示');
+                            this.selectedLogs = [];
+                            this.loadLogs();
+                            this.loadStats();
+                        } else {
+                            await showAlert('清空失败: ' + data.error, 'error', '提示');
+                        }
+                    } catch (error) {
+                        console.error('Error clearing logs:', error);
+                        await showAlert('清空失败: ' + error.message, 'error', '提示');
+                    }
+                },
+
+                async performClearErrors() {
+                    try {
+                        const response = await fetch('/admin/logs/clear-errors', {
+                            method: 'DELETE'
+                        });
+
+                        const data = await response.json();
+
+                        if (data.success) {
+                            await showAlert(`成功清空错误日志，删除了 ${data.deleted_count} 条记录`, 'success', '提示');
+                            this.selectedLogs = [];
+                            this.loadLogs();
+                            this.loadStats();
+                        } else {
+                            await showAlert('清空错误日志失败: ' + data.error, 'error', '提示');
+                        }
+                    } catch (error) {
+                        console.error('Error clearing error logs:', error);
+                        await showAlert('清空错误日志失败: ' + error.message, 'error', '提示');
+                    }
+                },
+
+                // 导出日志
+                async exportLogs() {
+                    try {
+                        const params = new URLSearchParams();
+                        if (this.filters.proxyKeyName) params.append('proxy_key_name', this.filters.proxyKeyName);
+                        if (this.filters.providerGroup) params.append('provider_group', this.filters.providerGroup);
+                        if (this.filters.model) params.append('model', this.filters.model);
+                        if (this.filters.status) params.append('status', this.filters.status);
+                        if (this.filters.stream) params.append('stream', this.filters.stream);
+                        params.append('format', 'csv');
+
+                        const url = `/admin/logs/export?${params}`;
+
+                        // 创建一个隐藏的链接来触发下载
+                        const link = document.createElement('a');
+                        link.href = url;
+                        link.style.display = 'none';
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                    } catch (error) {
+                        console.error('Error exporting logs:', error);
+                        await showAlert('导出失败: ' + error.message, 'error', '提示');
+                    }
+                },
+
+                // Token统计导出
+                exportTokenStats() {
+                    const stats = [
+                        {
+                            '指标': '总Token数',
+                            '数值': this.totalTokensUsed,
+                            '趋势': this.getTokenTrend('total')
+                        },
+                        {
+                            '指标': '成功Token数',
+                            '数值': this.successTokensUsed,
+                            '趋势': this.getTokenTrend('success')
+                        },
+                        {
+                            '指标': '平均Token/请求',
+                            '数值': this.avgTokensPerRequest,
+                            '趋势': this.getTokenTrend('avg')
+                        },
+                        {
+                            '指标': 'Token成功率',
+                            '数值': this.tokenSuccessRate + '%',
+                            '趋势': this.getTokenTrend('rate')
+                        }
+                    ];
+
+                    this.exportToCSV(stats, 'token_stats');
+                },
+
+                // CSV导出工具
+                exportToCSV(data, filename = 'data') {
+                    if (!data || data.length === 0) return;
+
+                    const headers = Object.keys(data[0]);
+                    const csvContent = [
+                        headers.join(','),
+                        ...data.map(row => headers.map(header => {
+                            const value = row[header];
+                            return typeof value === 'string' && value.includes(',') ? `"${value}"` : value;
+                        }).join(','))
+                    ].join('\n');
+
+                    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                    const link = document.createElement('a');
+                    link.href = URL.createObjectURL(blob);
+                    link.download = `${filename}.csv`;
+                    link.click();
+                },
+
+
+                // 图表实例管理
+                chartInstances: {
+                    status: null,
+                    model: null,
+                    tokenTrend: null,
+                    groupToken: null
+                },
+
+                // 图表相关方法
+                initCharts() {
+                    // 确保DOM已渲染且数据已加载
+                    if (typeof Chart === 'undefined') {
+                        console.warn('Chart.js not loaded');
+                        return;
+                    }
+
+                    try {
+                        this.createStatusChart();
+                        this.createModelChart();
+                        this.createTokenTrendChart();
+                        this.createGroupTokenChart();
+                    } catch (error) {
+                        console.error('Error initializing charts:', error);
+                    }
+                },
+
+                updateCharts() {
+                    // 销毁现有图表实例
+                    this.destroyCharts();
+                    // 重新创建图表
+                    this.initCharts();
+                },
+
+                destroyCharts() {
+                    Object.keys(this.chartInstances).forEach(key => {
+                        if (this.chartInstances[key]) {
+                            this.chartInstances[key].destroy();
+                            this.chartInstances[key] = null;
+                        }
+                    });
+                },
+
+                updateChartsWithTimeRange() {
+                    // 根据时间范围更新图表数据
+                    this.updateCharts();
+                },
+
+                resetAllCharts() {
+                    // 重置所有图表缩放
+                    Object.values(this.chartInstances).forEach(chart => {
+                        if (chart && chart.resetZoom) {
+                            chart.resetZoom();
+                        }
+                    });
+                },
+
+                exportChart(chartId) {
+                    const chart = this.chartInstances[chartId];
+                    if (chart) {
+                        const url = chart.toBase64Image();
+                        const link = document.createElement('a');
+                        link.download = `${chartId}_chart.png`;
+                        link.href = url;
+                        link.click();
+                    }
+                },
+
+                async exportAllCharts() {
+                    Object.keys(this.chartInstances).forEach(chartId => {
+                        this.exportChart(chartId);
+                    });
+                },
+
+                toggleFullscreen(chartId) {
+                    this.fullscreenChart = !this.fullscreenChart;
+                    this.fullscreenChartTitle = chartId;
+
+                    if (this.fullscreenChart) {
+                        // 延迟创建全屏图表，确保DOM已渲染
+                        setTimeout(async () => {
+                            await this.createFullscreenChart(chartId);
+                        }, 100);
+                    }
+                },
+
+                exitFullscreen() {
+                    this.fullscreenChart = false;
+                    // 销毁全屏图表实例
+                    if (this.fullscreenChartInstance) {
+                        this.fullscreenChartInstance.destroy();
+                        this.fullscreenChartInstance = null;
+                    }
+                },
+
+                // 全屏图表实例
+                fullscreenChartInstance: null,
+
+                async createFullscreenChart(chartId) {
+                    const canvas = document.getElementById('fullscreenChart');
+                    if (!canvas) return;
+
+                    const ctx = canvas.getContext('2d');
+
+                    // 销毁之前的全屏图表实例
+                    if (this.fullscreenChartInstance) {
+                        this.fullscreenChartInstance.destroy();
+                    }
+
+                    // 根据图表类型创建对应的全屏图表
+                    switch (chartId) {
+                        case 'statusChart':
+                            await this.createFullscreenStatusChart(ctx);
+                            break;
+                        case 'modelChart':
+                            await this.createFullscreenModelChart(ctx);
+                            break;
+                        case 'tokenTrendChart':
+                            await this.createFullscreenTokenTrendChart(ctx);
+                            break;
+                        case 'groupTokenChart':
+                            await this.createFullscreenGroupTokenChart(ctx);
+                            break;
+                    }
+                },
+
+                async createFullscreenStatusChart(ctx) {
+                    // 使用全局聚合数据
+                    let successCount = 0;
+                    let errorCount = 0;
+
+                    try {
+                        const params = new URLSearchParams();
+                        if (this.chartTimeRange) params.append('range', this.chartTimeRange);
+                        if (this.filters.proxyKeyName) params.append('proxy_key_name', this.filters.proxyKeyName);
+                        if (this.filters.providerGroup) params.append('provider_group', this.filters.providerGroup);
+                        if (this.filters.model) params.append('model', this.filters.model);
+                        if (this.filters.stream) params.append('stream', this.filters.stream);
+
+                        const response = await fetch(`/admin/logs/stats/status?${params}`);
+                        const result = await response.json();
+
+                        if (result.success && result.data) {
+                            successCount = result.data.success || 0;
+                            errorCount = result.data.error || 0;
+                        }
+                    } catch (error) {
+                        console.error('Failed to fetch status stats for fullscreen:', error);
+                        successCount = this.successRequests || 0;
+                        errorCount = this.errorRequests || 0;
+                    }
+
+                    const labels = ['成功请求', '失败请求'];
+                    const data = [successCount, errorCount];
+                    const colors = ['#10B981', '#EF4444'];
+
+                    this.fullscreenChartInstance = new Chart(ctx, {
+                        type: 'doughnut',
+                        data: {
+                            labels: labels,
+                            datasets: [{
+                                data: data,
+                                backgroundColor: colors,
+                                borderWidth: 2,
+                                borderColor: '#ffffff'
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: {
+                                    position: 'bottom',
+                                    labels: {
+                                        padding: 20,
+                                        usePointStyle: true,
+                                        font: { size: 16 }
+                                    }
+                                },
+                                tooltip: {
+                                    callbacks: {
+                                        label: function (context) {
+                                            const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                            const percentage = total > 0 ? ((context.parsed * 100) / total).toFixed(1) : 0;
+                                            return `${context.label}: ${context.parsed} (${percentage}%)`;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    });
+                },
+
+                async createFullscreenModelChart(ctx) {
+                    // 使用全局聚合数据
+                    let labels = [];
+                    let data = [];
+
+                    try {
+                        const params = new URLSearchParams();
+                        if (this.chartTimeRange) params.append('range', this.chartTimeRange);
+                        if (this.filters.proxyKeyName) params.append('proxy_key_name', this.filters.proxyKeyName);
+                        if (this.filters.providerGroup) params.append('provider_group', this.filters.providerGroup);
+                        if (this.filters.model) params.append('model', this.filters.model);
+                        if (this.filters.stream) params.append('stream', this.filters.stream);
+
+                        const response = await fetch(`/admin/logs/stats/models?${params}`);
+                        const result = await response.json();
+
+                        if (result.success && result.stats) {
+                            const sortedModels = result.stats
+                                .sort((a, b) => b.total_requests - a.total_requests)
+                                .slice(0, 10);
+
+                            labels = sortedModels.map(stat => stat.model || 'unknown');
+                            data = sortedModels.map(stat => stat.total_requests || 0);
+                        }
+                    } catch (error) {
+                        console.error('Failed to fetch model stats for fullscreen:', error);
+                        // 降级到使用分页数据
+                        const modelCounts = {};
+                        this.logs.forEach(log => {
+                            const model = log.model || 'unknown';
+                            modelCounts[model] = (modelCounts[model] || 0) + 1;
+                        });
+                        const sortedModels = Object.entries(modelCounts)
+                            .sort(([, a], [, b]) => b - a)
+                            .slice(0, 10);
+                        labels = sortedModels.map(([model]) => model);
+                        data = sortedModels.map(([, count]) => count);
+                    }
+
+                    this.fullscreenChartInstance = new Chart(ctx, {
+                        type: 'bar',
+                        data: {
+                            labels: labels,
+                            datasets: [{
+                                label: '使用次数',
+                                data: data,
+                                backgroundColor: 'rgba(59, 130, 246, 0.8)',
+                                borderColor: 'rgba(59, 130, 246, 1)',
+                                borderWidth: 1
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            scales: {
+                                y: {
+                                    beginAtZero: true,
+                                    ticks: {
+                                        stepSize: 1,
+                                        font: { size: 14 }
+                                    }
+                                },
+                                x: {
+                                    ticks: {
+                                        maxRotation: 45,
+                                        minRotation: 45,
+                                        font: { size: 14 }
+                                    }
+                                }
+                            },
+                            plugins: {
+                                legend: {
+                                    display: false
+                                },
+                                tooltip: {
+                                    callbacks: {
+                                        label: function (context) {
+                                            return `使用次数: ${context.parsed.y}`;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    });
+                },
+
+                async createFullscreenTokenTrendChart(ctx) {
+                    // 使用全局聚合数据
+                    let labels = [];
+                    let totalTokens = [];
+                    let successTokens = [];
+
+                    try {
+                        const params = new URLSearchParams();
+                        if (this.chartTimeRange) params.append('range', this.chartTimeRange);
+                        if (this.filters.proxyKeyName) params.append('proxy_key_name', this.filters.proxyKeyName);
+                        if (this.filters.providerGroup) params.append('provider_group', this.filters.providerGroup);
+                        if (this.filters.model) params.append('model', this.filters.model);
+                        if (this.filters.stream) params.append('stream', this.filters.stream);
+
+                        const response = await fetch(`/admin/logs/stats/tokens-timeline?${params}`);
+                        const result = await response.json();
+
+                        if (result.success && result.data) {
+                            const timeline = result.data.sort((a, b) => a.date.localeCompare(b.date));
+                            labels = timeline.map(point => point.date);
+                            totalTokens = timeline.map(point => point.total || 0);
+                            successTokens = timeline.map(point => point.success || 0);
+                        }
+                    } catch (error) {
+                        console.error('Failed to fetch tokens timeline for fullscreen:', error);
+                        // 降级到使用分页数据
+                        const tokenByTime = {};
+                        this.logs.forEach(log => {
+                            if (log.created_at && log.tokens_used) {
+                                const date = new Date(log.created_at).toISOString().split('T')[0];
+                                if (!tokenByTime[date]) {
+                                    tokenByTime[date] = { total: 0, success: 0 };
+                                }
+                                tokenByTime[date].total += parseInt(log.tokens_used) || 0;
+                                if (log.status_code === 200) {
+                                    tokenByTime[date].success += parseInt(log.tokens_used) || 0;
+                                }
+                            }
+                        });
+                        const sortedDates = Object.keys(tokenByTime).sort();
+                        labels = sortedDates;
+                        totalTokens = sortedDates.map(date => tokenByTime[date].total);
+                        successTokens = sortedDates.map(date => tokenByTime[date].success);
+                    }
+
+                    this.fullscreenChartInstance = new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: labels,
+                            datasets: [{
+                                label: '总Token数',
+                                data: totalTokens,
+                                borderColor: 'rgba(59, 130, 246, 1)',
+                                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                                fill: true,
+                                tension: 0.4
+                            }, {
+                                label: '成功Token数',
+                                data: successTokens,
+                                borderColor: 'rgba(16, 185, 129, 1)',
+                                backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                                fill: true,
+                                tension: 0.4
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            scales: {
+                                y: {
+                                    beginAtZero: true,
+                                    ticks: { font: { size: 14 } }
+                                },
+                                x: {
+                                    ticks: { font: { size: 14 } }
+                                }
+                            },
+                            plugins: {
+                                legend: {
+                                    position: 'top',
+                                    labels: { font: { size: 16 } }
+                                }
+                            }
+                        }
+                    });
+                },
+
+                createFullscreenGroupTokenChart(ctx) {
+                    // 按服务商分组统计Token
+                    const groupTokens = {};
+                    this.logs.forEach(log => {
+                        if (log.provider_group && log.tokens_used) {
+                            const group = log.provider_group;
+                            if (!groupTokens[group]) {
+                                groupTokens[group] = { total: 0, success: 0 };
+                            }
+                            groupTokens[group].total += parseInt(log.tokens_used) || 0;
+                            if (log.status_code === 200) {
+                                groupTokens[group].success += parseInt(log.tokens_used) || 0;
+                            }
+                        }
+                    });
+
+                    const labels = Object.keys(groupTokens);
+                    const totalData = labels.map(group => groupTokens[group].total);
+                    const successData = labels.map(group => groupTokens[group].success);
+
+                    this.fullscreenChartInstance = new Chart(ctx, {
+                        type: 'bar',
+                        data: {
+                            labels: labels,
+                            datasets: [{
+                                label: '总Token数',
+                                data: totalData,
+                                backgroundColor: 'rgba(59, 130, 246, 0.8)',
+                                borderColor: 'rgba(59, 130, 246, 1)',
+                                borderWidth: 1
+                            }, {
+                                label: '成功Token数',
+                                data: successData,
+                                backgroundColor: 'rgba(16, 185, 129, 0.8)',
+                                borderColor: 'rgba(16, 185, 129, 1)',
+                                borderWidth: 1
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            scales: {
+                                y: {
+                                    beginAtZero: true,
+                                    ticks: { font: { size: 14 } }
+                                },
+                                x: {
+                                    ticks: { font: { size: 14 } }
+                                }
+                            },
+                            plugins: {
+                                legend: {
+                                    position: 'top',
+                                    labels: { font: { size: 16 } }
+                                }
+                            }
+                        }
+                    });
+                },
+
+                // 实际的图表创建方法 - 使用全局聚合数据
+                async createStatusChart() {
+                    const canvas = document.getElementById('statusChart');
+                    if (!canvas) return;
+
+                    const ctx = canvas.getContext('2d');
+
+                    // 从全局聚合数据获取状态分布
+                    let successCount = 0;
+                    let errorCount = 0;
+
+                    try {
+                        // 构建查询参数
+                        const params = new URLSearchParams();
+                        if (this.chartTimeRange) params.append('range', this.chartTimeRange);
+                        if (this.filters.proxyKeyName) params.append('proxy_key_name', this.filters.proxyKeyName);
+                        if (this.filters.providerGroup) params.append('provider_group', this.filters.providerGroup);
+                        if (this.filters.model) params.append('model', this.filters.model);
+                        if (this.filters.stream) params.append('stream', this.filters.stream);
+
+                        const response = await fetch(`/admin/logs/stats/status?${params}`);
+                        const result = await response.json();
+
+                        if (result.success && result.data) {
+                            successCount = result.data.success || 0;
+                            errorCount = result.data.error || 0;
+                        }
+                    } catch (error) {
+                        console.error('Failed to fetch status stats:', error);
+                        // 降级到使用现有统计数据
+                        successCount = this.successRequests || 0;
+                        errorCount = this.errorRequests || 0;
+                    }
+
+                    const labels = ['成功请求', '失败请求'];
+                    const data = [successCount, errorCount];
+                    const colors = ['#10B981', '#EF4444']; // 绿色和红色
+
+                    this.chartInstances.status = new Chart(ctx, {
+                        type: 'doughnut',
+                        data: {
+                            labels: labels,
+                            datasets: [{
+                                data: data,
+                                backgroundColor: colors,
+                                borderWidth: 2,
+                                borderColor: '#ffffff'
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: {
+                                    position: 'bottom',
+                                    labels: {
+                                        padding: 20,
+                                        usePointStyle: true
+                                    }
+                                },
+                                tooltip: {
+                                    callbacks: {
+                                        label: function (context) {
+                                            const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                            const percentage = total > 0 ? ((context.parsed * 100) / total).toFixed(1) : 0;
+                                            return `${context.label}: ${context.parsed} (${percentage}%)`;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    });
+                },
+
+                async createModelChart() {
+                    const canvas = document.getElementById('modelChart');
+                    if (!canvas) {
+                        console.error('Model chart canvas not found');
+                        return;
+                    }
+
+                    const ctx = canvas.getContext('2d');
+                    console.log('Creating model chart...');
+
+                    // 从全局聚合数据获取模型使用分布
+                    let labels = [];
+                    let data = [];
+
+                    try {
+                        // 构建查询参数
+                        const params = new URLSearchParams();
+                        if (this.chartTimeRange) params.append('range', this.chartTimeRange);
+                        if (this.filters.proxyKeyName) params.append('proxy_key_name', this.filters.proxyKeyName);
+                        if (this.filters.providerGroup) params.append('provider_group', this.filters.providerGroup);
+                        if (this.filters.model) params.append('model', this.filters.model);
+                        if (this.filters.stream) params.append('stream', this.filters.stream);
+
+                        const response = await fetch(`/admin/logs/stats/models?${params}`);
+                        const result = await response.json();
+
+                        if (result.success && result.stats) {
+                            // 取前10个最常用的模型
+                            const sortedModels = result.stats
+                                .sort((a, b) => (b.total_requests || 0) - (a.total_requests || 0))
+                                .slice(0, 10);
+
+                            labels = sortedModels.map(stat => stat.model || 'unknown');
+                            data = sortedModels.map(stat => stat.total_requests || 0);
+                        } else {
+                            console.warn('API响应格式错误:', result);
+                            throw new Error('API响应格式错误');
+                        }
+                    } catch (error) {
+                        console.error('Failed to fetch model stats:', error);
+                        // 降级到使用分页数据进行粗略统计
+                        const modelCounts = {};
+                        this.logs.forEach(log => {
+                            const model = log.model || 'unknown';
+                            modelCounts[model] = (modelCounts[model] || 0) + 1;
+                        });
+
+                        if (Object.keys(modelCounts).length > 0) {
+                            const sortedModels = Object.entries(modelCounts)
+                                .sort(([, a], [, b]) => b - a)
+                                .slice(0, 10);
+                            labels = sortedModels.map(([model]) => model);
+                            data = sortedModels.map(([, count]) => count);
+                        } else {
+                            // 如果完全没有数据，显示占位数据
+                            labels = ['无数据'];
+                            data = [0];
+                        }
+                    }
+
+                    // 确保至少有一些数据显示
+                    if (labels.length === 0) {
+                        labels = ['无数据'];
+                        data = [0];
+                    }
+
+                    console.log('Model chart data:', { labels, data });
+
+                    this.chartInstances.model = new Chart(ctx, {
+                        type: 'bar',
+                        data: {
+                            labels: labels,
+                            datasets: [{
+                                label: '使用次数',
+                                data: data,
+                                backgroundColor: 'rgba(59, 130, 246, 0.8)',
+                                borderColor: 'rgba(59, 130, 246, 1)',
+                                borderWidth: 1
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            scales: {
+                                y: {
+                                    beginAtZero: true,
+                                    ticks: {
+                                        stepSize: 1
+                                    }
+                                },
+                                x: {
+                                    ticks: {
+                                        maxRotation: 45,
+                                        minRotation: 45
+                                    }
+                                }
+                            },
+                            plugins: {
+                                legend: {
+                                    display: false
+                                },
+                                tooltip: {
+                                    callbacks: {
+                                        label: function (context) {
+                                            return `使用次数: ${context.parsed.y}`;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    });
+
+                    console.log('Model chart created successfully');
+                },
+
+                async createTokenTrendChart() {
+                    const canvas = document.getElementById('tokenTrendChart');
+                    if (!canvas) return;
+
+                    const ctx = canvas.getContext('2d');
+
+                    // 从全局聚合数据获取Token时间线
+                    let labels = [];
+                    let totalTokens = [];
+                    let successTokens = [];
+
+                    try {
+                        // 构建查询参数
+                        const params = new URLSearchParams();
+                        if (this.chartTimeRange) params.append('range', this.chartTimeRange);
+                        if (this.filters.proxyKeyName) params.append('proxy_key_name', this.filters.proxyKeyName);
+                        if (this.filters.providerGroup) params.append('provider_group', this.filters.providerGroup);
+                        if (this.filters.model) params.append('model', this.filters.model);
+                        if (this.filters.stream) params.append('stream', this.filters.stream);
+
+                        const response = await fetch(`/admin/logs/stats/tokens-timeline?${params}`);
+                        const result = await response.json();
+
+                        if (result.success && result.data) {
+                            const timeline = result.data.sort((a, b) => a.date.localeCompare(b.date));
+                            labels = timeline.map(point => point.date);
+                            totalTokens = timeline.map(point => point.total || 0);
+                            successTokens = timeline.map(point => point.success || 0);
+                        }
+                    } catch (error) {
+                        console.error('Failed to fetch tokens timeline:', error);
+                        // 降级到使用分页数据进行粗略统计
+                        const tokenByTime = {};
+                        this.logs.forEach(log => {
+                            if (log.created_at && log.tokens_used) {
+                                const date = new Date(log.created_at).toISOString().split('T')[0];
+                                if (!tokenByTime[date]) {
+                                    tokenByTime[date] = { total: 0, success: 0 };
+                                }
+                                tokenByTime[date].total += parseInt(log.tokens_used) || 0;
+                                if (log.status_code === 200) {
+                                    tokenByTime[date].success += parseInt(log.tokens_used) || 0;
+                                }
+                            }
+                        });
+                        const sortedDates = Object.keys(tokenByTime).sort();
+                        labels = sortedDates;
+                        totalTokens = sortedDates.map(date => tokenByTime[date].total);
+                        successTokens = sortedDates.map(date => tokenByTime[date].success);
+                    }
+
+                    this.chartInstances.tokenTrend = new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: labels,
+                            datasets: [{
+                                label: '总Token数',
+                                data: totalTokens,
+                                borderColor: 'rgba(59, 130, 246, 1)',
+                                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                                fill: true,
+                                tension: 0.4
+                            }, {
+                                label: '成功Token数',
+                                data: successTokens,
+                                borderColor: 'rgba(16, 185, 129, 1)',
+                                backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                                fill: true,
+                                tension: 0.4
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            scales: {
+                                y: {
+                                    beginAtZero: true
+                                }
+                            },
+                            plugins: {
+                                legend: {
+                                    position: 'top'
+                                }
+                            }
+                        }
+                    });
+                },
+
+                async createGroupTokenChart() {
+                    const canvas = document.getElementById('groupTokenChart');
+                    if (!canvas) return;
+
+                    const ctx = canvas.getContext('2d');
+
+                    // 从全局聚合数据获取分组Token统计
+                    let labels = [];
+                    let totalData = [];
+                    let successData = [];
+
+                    try {
+                        // 构建查询参数
+                        const params = new URLSearchParams();
+                        if (this.chartTimeRange) params.append('range', this.chartTimeRange);
+                        if (this.filters.proxyKeyName) params.append('proxy_key_name', this.filters.proxyKeyName);
+                        if (this.filters.providerGroup) params.append('provider_group', this.filters.providerGroup);
+                        if (this.filters.model) params.append('model', this.filters.model);
+                        if (this.filters.stream) params.append('stream', this.filters.stream);
+
+                        const response = await fetch(`/admin/logs/stats/group-tokens?${params}`);
+                        const result = await response.json();
+
+                        if (result.success && result.data) {
+                            const groups = result.data.slice(0, 10); // 取前10个分组
+                            labels = groups.map(group => group.group || '-');
+                            totalData = groups.map(group => group.total || 0);
+                            successData = groups.map(group => group.success || 0);
+                        }
+                    } catch (error) {
+                        console.error('Failed to fetch group tokens stats:', error);
+                        // 降级到使用分页数据进行粗略统计
+                        const groupTokens = {};
+                        this.logs.forEach(log => {
+                            if (log.provider_group && log.tokens_used) {
+                                const group = log.provider_group;
+                                if (!groupTokens[group]) {
+                                    groupTokens[group] = { total: 0, success: 0 };
+                                }
+                                groupTokens[group].total += parseInt(log.tokens_used) || 0;
+                                if (log.status_code === 200) {
+                                    groupTokens[group].success += parseInt(log.tokens_used) || 0;
+                                }
+                            }
+                        });
+                        labels = Object.keys(groupTokens);
+                        totalData = labels.map(group => groupTokens[group].total);
+                        successData = labels.map(group => groupTokens[group].success);
+                    }
+
+                    this.chartInstances.groupToken = new Chart(ctx, {
+                        type: 'bar',
+                        data: {
+                            labels: labels,
+                            datasets: [{
+                                label: '总Token数',
+                                data: totalData,
+                                backgroundColor: 'rgba(59, 130, 246, 0.8)',
+                                borderColor: 'rgba(59, 130, 246, 1)',
+                                borderWidth: 1
+                            }, {
+                                label: '成功Token数',
+                                data: successData,
+                                backgroundColor: 'rgba(16, 185, 129, 0.8)',
+                                borderColor: 'rgba(16, 185, 129, 1)',
+                                borderWidth: 1
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            scales: {
+                                y: {
+                                    beginAtZero: true
+                                }
+                            },
+                            plugins: {
+                                legend: {
+                                    position: 'top'
+                                }
+                            }
+                        }
+                    });
+                }
+            }
+        }
+    </script>
+</body>
+
+</html>
