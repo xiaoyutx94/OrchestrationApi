@@ -2,42 +2,51 @@
 
 一个基于 .NET 9 的企业级多服务商 AI API 代理服务，提供统一的 OpenAI 兼容接口，支持智能路由、故障转移、负载均衡等企业级功能。
 
-## 🚀 核心特性
+## 🚀 核心特性（Claude帮我吹的，但意思差不多）
 
 ### 多服务商支持
-- **OpenAI**: GPT-3.5、GPT-4、GPT-4 Turbo 等全系列模型
-- **Anthropic Claude**: Claude 3 Haiku、Claude 3 Sonnet、Claude 3 Opus
-- **Google Gemini**: Gemini Pro、Gemini Vision 等
-- **可扩展架构**: 轻松添加更多 AI 服务商
+- **OpenAI**: 支持 GPT-3.5、GPT-4、GPT-4 Turbo 等全系列模型
+- **Anthropic Claude**: 支持 Claude 3 Haiku、Claude 3 Sonnet、Claude 3 Opus、Claude 3.5 Sonnet 等
+- **Google Gemini**: 支持 Gemini Pro、Gemini Flash、Gemini Vision 等模型
+- **透明代理模式**: 支持各服务商的原生 API 格式（OpenAI、Anthropic、Gemini）
+- **可扩展架构**: 通过接口驱动设计，轻松添加更多 AI 服务商
 
 ### 智能路由与负载均衡
-- **智能路由**: 基于模型、负载、健康状态自动选择最佳提供商
-- **多种负载均衡策略**: 轮询(round_robin)、随机(random)、最少使用(least_used)
-- **故障转移**: 自动重试机制，无感切换到备用提供商
-- **健康检查**: 实时监控 API 密钥状态和服务可用性
+- **智能路由**: 基于模型、代理密钥权限、分组优先级自动选择最佳提供商
+- **多重故障转移**: 支持密钥级别和分组级别的智能故障转移
+- **负载均衡策略**: 支持轮询(round_robin)负载均衡策略
+- **实时健康检查**: 自动监控 API 密钥状态，智能剔除无效密钥
+- **分组权重配置**: 支持基于权重的分组选择策略
 
-### OpenAI 完全兼容
-- **无缝替换**: 完全兼容 OpenAI API 格式，直接替换 base_url 即可使用
-- **流式响应**: 完整的 Server-Sent Events 支持
+### 完全兼容多种 API 格式
+- **OpenAI 兼容**: 完全兼容 OpenAI API v1 格式，直接替换 base_url 即可使用
+- **Anthropic 原生**: 支持 Anthropic Claude 原生 API 格式（/v1/messages）
+- **Gemini 原生**: 支持 Google Gemini 原生 API 格式（generateContent）
+- **流式响应**: 完整的 Server-Sent Events 支持，支持所有服务商的流式输出
 - **函数调用**: 完整的 Function Calling 和 Tools 支持
-- **参数透传**: 支持所有 OpenAI 参数，包括 temperature、top_p 等
+- **参数透传**: 支持所有原生参数，包括 temperature、top_p、max_tokens 等
 
 ### 企业级管理功能
-- **Web 管理界面**: 现代化的管理仪表板，实时监控和配置
-- **多级代理密钥**: 灵活的密钥管理和权限控制
-- **请求日志**: 详细的请求统计和分析
-- **实时监控**: 系统状态、性能指标、错误统计
+- **现代化 Web 管理界面**: 响应式设计的管理仪表板
+- **分组管理**: 灵活的服务商分组配置和管理
+- **代理密钥系统**: 多级代理密钥管理和权限控制
+- **实时日志分析**: 详细的请求统计、性能分析和错误跟踪
+- **系统监控**: 实时系统状态、性能指标、资源使用情况监控
+- **密钥健康检查**: 自动检测和管理无效的 API 密钥
 
 ### 高性能与可扩展性
-- **异步架构**: 全异步设计，支持高并发请求
-- **连接池**: HTTP 客户端连接池优化
-- **缓存支持**: 内存缓存
-- **Docker 支持**: 完整的容器化部署方案
+- **全异步架构**: 基于 .NET 9 异步模式，支持高并发请求
+- **HTTP 连接池**: 优化的 HTTP 客户端连接池管理
+- **内存缓存**: 智能缓存机制提升响应性能
+- **Docker 原生支持**: 完整的容器化部署方案
+- **数据库支持**: 支持 SQLite（开发）和 MySQL（生产）
+- **配置热重载**: 支持动态配置更新
 
 ## 📋 系统要求
 
 - .NET 9 SDK 或 Docker
 - SQLite（默认）或 MySQL 数据库
+- 支持的操作系统：Windows、Linux、macOS
 
 ## 🚀 快速开始
 
@@ -45,26 +54,29 @@
 
 1. **准备部署文件**
 ```bash
-# 下载 docker-compose.yml
-wget https://raw.githubusercontent.com/your-repo/OrchestrationApi/main/docker-compose.yml
+# 克隆或下载项目
+git clone <repository-url>
+cd OrchestrationApi
 
-# 创建配置文件
-mkdir -p config
-cp appsettings.json config/appsettings.Production.json
+# 创建数据目录
+mkdir -p data logs
 ```
 
 2. **启动服务**
 ```bash
-# 启动完整环境（包含 MySQL）
+# 使用 Docker Compose 启动服务
 docker-compose up -d
 
-# 或仅启动 API 服务（使用 SQLite）
-docker-compose up -d orchestration-api
+# 查看服务状态
+docker-compose logs -f orchestration-api
 ```
 
 3. **访问服务**
+- 初始用户名密码：admin/admin123
 - 管理界面: http://localhost:5000/dashboard
-- API 文档: http://localhost:5000/swagger
+- 登录页面: http://localhost:5000/login
+- 日志查看: http://localhost:5000/logs
+- API 文档: http://localhost:5000/swagger（开发环境）
 - 健康检查: http://localhost:5000/health
 
 ### 本地开发
@@ -104,35 +116,105 @@ dotnet watch run
   "OrchestrationApi": {
     "Server": {
       "Host": "0.0.0.0",
-      "Port": 5000
+      "Port": 5000,
+      "Mode": "release"
     },
     "Auth": {
       "Username": "admin",
-      "Password": "your-secure-password",
-      "JwtSecret": "your-jwt-secret-key-change-in-production"
+      "Password": "admin123",
+      "SessionTimeout": 86400,
+      "JwtSecret": "OrchestrationApi-SecretKey-2025-ChangeMeInProduction"
     },
     "Database": {
       "Type": "sqlite",
-      "ConnectionString": "Data Source=Data/orchestration_api.db"
+      "ConnectionString": "Data Source=Data/orchestration_api.db",
+      "MySqlConnectionString": "Server=localhost;Database=orchestration_api;Uid=root;Pwd=password;",
+      "TablePrefix": "orch_"
     },
     "Global": {
       "Timeout": 60,
+      "ConnectionTimeout": 30,
+      "ResponseTimeout": 300,
       "Retries": 3,
-      "BalancePolicy": "round_robin"
+      "BalancePolicy": "round_robin",
+      "MaxProviderRetries": 3
+    },
+    "RequestLogging": {
+      "Enabled": true,
+      "EnableDetailedContent": true,
+      "MaxContentLength": 10000,
+      "ExcludeHealthChecks": true,
+      "RetentionDays": 30
+    },
+    "KeyHealthCheck": {
+      "IntervalMinutes": 5,
+      "Enabled": true
     }
   }
 }
 ```
 
-### MySQL 数据库配置
+### 高级配置选项
 
+#### Gemini 专用配置
+```json
+{
+  "Gemini": {
+    "StreamingTimeout": 300,
+    "NonStreamingTimeout": 180,
+    "ConnectionTimeout": 30,
+    "QualityCheck": {
+      "Enabled": true,
+      "BufferSize": 10,
+      "DetectEmptyResponse": true,
+      "DetectTruncation": true
+    },
+    "AutoRetry": {
+      "Enabled": true,
+      "MaxRetries": 2,
+      "RetryOnEmpty": true,
+      "RetryOnTruncation": true
+    }
+  }
+}
+```
+
+#### 生产环境 MySQL 配置
 ```json
 {
   "OrchestrationApi": {
     "Database": {
       "Type": "mysql",
-      "MySqlConnectionString": "Server=localhost;Database=orchestration_api;Uid=root;Pwd=password;"
+      "MySqlConnectionString": "Server=localhost;Database=orchestration_api;Uid=orchestration;Pwd=secure_password;CharSet=utf8mb4;"
     }
+  }
+}
+```
+
+#### 日志配置 (Serilog)
+```json
+{
+  "Serilog": {
+    "MinimumLevel": {
+      "Default": "Information",
+      "Override": {
+        "Microsoft": "Warning",
+        "System": "Warning"
+      }
+    },
+    "WriteTo": [
+      {
+        "Name": "Console"
+      },
+      {
+        "Name": "File",
+        "Args": {
+          "path": "logs/orchestration-api-.log",
+          "rollingInterval": "Day",
+          "retainedFileCountLimit": 31
+        }
+      }
+    ]
   }
 }
 ```
@@ -140,7 +222,9 @@ dotnet watch run
 
 ## 📖 API 使用指南
 
-### 聊天完成接口
+### OpenAI 兼容 API
+
+#### 聊天完成接口
 
 与 OpenAI API 完全兼容，支持所有参数：
 
@@ -159,7 +243,7 @@ curl -X POST http://localhost:5000/v1/chat/completions \
   }'
 ```
 
-### 流式响应
+#### 流式响应
 
 ```bash
 curl -X POST http://localhost:5000/v1/chat/completions \
@@ -174,7 +258,7 @@ curl -X POST http://localhost:5000/v1/chat/completions \
   }'
 ```
 
-### 函数调用（Function Calling）
+#### 函数调用（Function Calling）
 
 ```bash
 curl -X POST http://localhost:5000/v1/chat/completions \
@@ -205,403 +289,242 @@ curl -X POST http://localhost:5000/v1/chat/completions \
   }'
 ```
 
+### Anthropic Claude 原生 API
+
+```bash
+curl -X POST http://localhost:5000/v1/messages \
+  -H "Authorization: Bearer your-proxy-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "claude-3-sonnet-20240229",
+    "max_tokens": 1000,
+    "messages": [
+      {"role": "user", "content": "Hello, Claude!"}
+    ]
+  }'
+```
+
+### Google Gemini 原生 API
+
+```bash
+curl -X POST "http://localhost:5000/v1beta/models/gemini-pro:generateContent" \
+  -H "Authorization: Bearer your-proxy-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "contents": [
+      {
+        "parts": [
+          {"text": "Hello, Gemini!"}
+        ]
+      }
+    ]
+  }'
+```
+
 ### 模型列表
 
 ```bash
+# OpenAI 格式
 curl -X GET http://localhost:5000/v1/models \
   -H "Authorization: Bearer your-proxy-key"
-```
 
-## 🔐 管理 API
-
-### 系统状态查询
-
-```bash
-curl -X GET http://localhost:5000/admin/status
-```
-
-### 提供商分组管理
-
-```bash
-# 获取分组列表
-curl -X GET http://localhost:5000/admin/groups
-
-# 创建 OpenAI 分组
-curl -X POST http://localhost:5000/admin/groups \
-  -H "Content-Type: application/json" \
-  -d '{
-    "groupName": "openai-primary",
-    "providerType": "openai",
-    "apiKeys": ["sk-your-openai-key-1", "sk-your-openai-key-2"],
-    "models": ["gpt-3.5-turbo", "gpt-4", "gpt-4-turbo"],
-    "balancePolicy": "round_robin",
-    "retryCount": 3,
-    "timeout": 60,
-    "priority": 1,
-    "enabled": true,
-    "parameters": {
-      "temperature": 0.7,
-      "max_tokens": 2000
-    }
-  }'
-
-# 更新分组
-curl -X PUT http://localhost:5000/admin/groups/1 \
-  -H "Content-Type: application/json" \
-  -d '{...}'
-
-# 删除分组
-curl -X DELETE http://localhost:5000/admin/groups/1
-```
-
-### 代理密钥管理
-
-```bash
-# 创建代理密钥
-curl -X POST http://localhost:5000/admin/proxy-keys \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "my-app-key",
-    "rpm": 100,
-    "enabled": true
-  }'
-```
-
-## 💻 客户端集成示例
-
-### Python (OpenAI SDK)
-
-```python
-from openai import OpenAI
-
-# 初始化客户端
-client = OpenAI(
-    api_key="your-proxy-key",
-    base_url="http://localhost:5000/v1"
-)
-
-# 聊天完成
-response = client.chat.completions.create(
-    model="gpt-3.5-turbo",
-    messages=[
-        {"role": "user", "content": "Hello, world!"}
-    ],
-    temperature=0.7,
-    max_tokens=1000
-)
-
-print(response.choices[0].message.content)
-
-# 流式响应
-stream = client.chat.completions.create(
-    model="gpt-4",
-    messages=[
-        {"role": "user", "content": "Tell me a story"}
-    ],
-    stream=True
-)
-
-for chunk in stream:
-    if chunk.choices[0].delta.content is not None:
-        print(chunk.choices[0].delta.content, end="")
-```
-
-### Node.js
-
-```javascript
-import OpenAI from 'openai';
-
-const openai = new OpenAI({
-  apiKey: 'your-proxy-key',
-  baseURL: 'http://localhost:5000/v1'
-});
-
-// 基础聊天
-const completion = await openai.chat.completions.create({
-  model: 'gpt-3.5-turbo',
-  messages: [
-    { role: 'user', content: 'Hello, world!' }
-  ],
-  temperature: 0.7
-});
-
-console.log(completion.choices[0].message.content);
-
-// 流式响应
-const stream = await openai.chat.completions.create({
-  model: 'gpt-4',
-  messages: [
-    { role: 'user', content: 'Tell me a story' }
-  ],
-  stream: true
-});
-
-for await (const chunk of stream) {
-  process.stdout.write(chunk.choices[0]?.delta?.content || '');
-}
-```
-
-### Go
-
-```go
-package main
-
-import (
-    "context"
-    "fmt"
-    "github.com/sashabaranov/go-openai"
-)
-
-func main() {
-    config := openai.DefaultConfig("your-proxy-key")
-    config.BaseURL = "http://localhost:5000/v1"
-    client := openai.NewClientWithConfig(config)
-
-    resp, err := client.CreateChatCompletion(
-        context.Background(),
-        openai.ChatCompletionRequest{
-            Model: openai.GPT3Dot5Turbo,
-            Messages: []openai.ChatCompletionMessage{
-                {
-                    Role:    openai.ChatMessageRoleUser,
-                    Content: "Hello, world!",
-                },
-            },
-        },
-    )
-
-    if err != nil {
-        fmt.Printf("Error: %v\n", err)
-        return
-    }
-
-    fmt.Println(resp.Choices[0].Message.Content)
-}
+# Gemini 格式
+curl -X GET http://localhost:5000/v1beta/models \
+  -H "Authorization: Bearer your-proxy-key"
 ```
 
 ## 🐳 Docker 部署
 
-### 基础部署
+### 基础部署（SQLite）
 
 ```yaml
 version: '3.8'
 services:
   orchestration-api:
     image: orchestration-api:latest
+    container_name: orchestration-api
     ports:
       - "5000:5000"
     environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - OrchestrationApi__Database__Type=sqlite
+      - OrchestrationApi__Database__ConnectionString=Data Source=/app/data/orchestration_api.db
       - OrchestrationApi__Auth__Password=your-secure-password
-      - OrchestrationApi__Auth__JwtSecret=your-jwt-secret
+      - OrchestrationApi__Auth__JwtSecret=your-jwt-secret-change-in-production
     volumes:
-      - ./data:/app/Data
+      - ./data:/app/data
       - ./logs:/app/logs
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 ```
 
-### 完整生产环境
+### 生产环境（MySQL）
 
 ```yaml
 version: '3.8'
 services:
   orchestration-api:
     image: orchestration-api:latest
+    container_name: orchestration-api
     ports:
       - "5000:5000"
     environment:
+      - ASPNETCORE_ENVIRONMENT=Production
       - OrchestrationApi__Database__Type=mysql
-      - OrchestrationApi__Database__MySqlConnectionString=Server=mysql;Database=orchestration_api;Uid=orchestration;Pwd=secure_password;
+      - OrchestrationApi__Database__MySqlConnectionString=Server=mysql;Database=orchestration_api;Uid=orchestration;Pwd=secure_password;CharSet=utf8mb4;
       - OrchestrationApi__Auth__Password=your-secure-password
+      - OrchestrationApi__Auth__JwtSecret=your-jwt-secret-change-in-production
     depends_on:
-      - mysql
+      mysql:
+        condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   mysql:
     image: mysql:8.0
+    container_name: orchestration-mysql
     environment:
       MYSQL_ROOT_PASSWORD: root_password
       MYSQL_DATABASE: orchestration_api
       MYSQL_USER: orchestration
       MYSQL_PASSWORD: secure_password
+      MYSQL_CHARSET: utf8mb4
+      MYSQL_COLLATION: utf8mb4_unicode_ci
+    ports:
+      - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
+      - ./mysql-init:/docker-entrypoint-initdb.d
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "orchestration", "-psecure_password"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
 volumes:
   mysql_data:
+    driver: local
 ```
-
-## 🔍 监控与运维
-
-### 健康检查端点
-
-- `/health` - 基础健康检查
-- `/health/ready` - 就绪检查（Kubernetes）
-- `/health/live` - 存活检查（Kubernetes）
-- `/admin/status` - 详细系统状态
-
-### 日志管理
-
-系统使用 Serilog 进行结构化日志记录：
-
-```bash
-# 查看实时日志
-tail -f logs/orchestration-api-$(date +%Y%m%d).log
-
-# Docker 环境日志
-docker logs -f orchestration-api
-```
-
-### 性能监控
-
-系统提供多个监控指标：
-
-- 请求处理时间
-- 成功/失败率
-- 提供商响应时间
-- 系统资源使用情况
-
-### 备份策略
-
-```bash
-# SQLite 数据库备份
-cp Data/orchestration_api.db backup/db-$(date +%Y%m%d-%H%M%S).db
-
-# MySQL 备份
-docker exec mysql mysqldump -u orchestration -p orchestration_api > backup/db-$(date +%Y%m%d-%H%M%S).sql
-```
-
-## 🛡️ 安全最佳实践
-
-1. **更改默认凭据**: 修改默认管理员用户名和密码
-2. **使用强密钥**: 设置复杂的 JWT 密钥和数据库密码
-3. **启用 HTTPS**: 生产环境必须使用 HTTPS
-4. **网络隔离**: 限制数据库的网络访问
-5. **定期备份**: 实施自动化备份策略
-6. **密钥轮换**: 定期更换 API 密钥
-7. **访问控制**: 使用防火墙限制访问源
 
 ## 🚨 故障排除
 
-### 常见问题
+### 常见问题和解决方案
 
-**1. 数据库连接失败**
+#### 1. 服务启动问题
+
+**问题**: 服务无法启动
+```bash
+# 检查服务状态
+docker-compose ps
+docker logs orchestration-api
+
+# 常见原因和解决方案
+# - 端口被占用: 修改docker-compose.yml中的端口映射
+# - 配置文件错误: 检查appsettings.json语法
+# - 数据库连接失败: 验证数据库配置和网络连接
+```
+
+#### 2. 数据库连接问题
+
+**问题**: 数据库连接失败
 ```bash
 # 检查数据库服务状态
 docker ps | grep mysql
+docker logs orchestration-mysql
+
 # 验证连接字符串
+# SQLite: 检查数据目录权限
+# MySQL: 验证用户名、密码、网络连接
+
+# 测试数据库连接
+curl http://localhost:5000/health/detailed
 ```
-
-**2. API 密钥验证失败**
-```bash
-# 查看密钥验证日志
-grep "Key validation failed" logs/orchestration-api-*.log
-```
-
-**3. 请求超时**
-```bash
-# 检查网络连接
-curl -I https://api.openai.com/v1/models
-# 调整超时设置
-```
-
-**4. 内存使用过高**
-```bash
-# 监控内存使用
-docker stats orchestration-api
-# 检查日志文件大小
-du -h logs/
-```
-
-### 诊断命令
-
-```bash
-# 系统状态检查
-curl http://localhost:5000/admin/status
-
-# 查看提供商状态
-curl http://localhost:5000/admin/groups
-
-# 检查代理密钥
-curl http://localhost:5000/admin/proxy-keys
-
-# 测试 API 可用性
-curl -X POST http://localhost:5000/v1/chat/completions \
-  -H "Authorization: Bearer test-key" \
-  -H "Content-Type: application/json" \
-  -d '{"model": "gpt-3.5-turbo", "messages": [{"role": "user", "content": "test"}]}'
-```
-
-## 📈 性能优化
-
-### 配置优化
-
-```json
-{
-  "OrchestrationApi": {
-    "Global": {
-      "Timeout": 30,
-      "Retries": 2,
-      "BalancePolicy": "least_used"
-    },
-    "RequestLogging": {
-      "Enabled": true,
-      "EnableDetailedContent": false,
-      "MaxContentLength": 1000
-    }
-  }
-}
-```
-
-### 扩展建议
-
-1. **负载均衡**: 使用 Nginx 或云负载均衡器
-2. **缓存策略**: 启用内存缓存常用响应
-3. **数据库优化**: 使用连接池和索引优化
-4. **监控告警**: 集成 Prometheus + Grafana
 
 ## 🤝 贡献指南
 
 我们欢迎社区贡献！请遵循以下步骤：
 
-1. Fork 本仓库
-2. 创建特性分支 (`git checkout -b feature/amazing-feature`)
-3. 提交更改 (`git commit -m 'Add amazing feature'`)
-4. 推送到分支 (`git push origin feature/amazing-feature`)
-5. 开启 Pull Request
+1. **Fork 项目**: Fork 本仓库到您的 GitHub 账户
+2. **创建分支**: `git checkout -b feature/amazing-feature`
+3. **开发功能**: 遵循项目的编码规范和架构设计
+4. **编写测试**: 为新功能添加适当的单元测试
+5. **提交更改**: `git commit -m 'Add amazing feature'`
+6. **推送分支**: `git push origin feature/amazing-feature`
+7. **创建 PR**: 开启 Pull Request 并详细描述变更内容
 
 ### 开发规范
 
-- 遵循 C# 编码规范
-- 添加适当的单元测试
-- 更新相关文档
-- 确保所有测试通过
+- **代码风格**: 遵循 C# 编码规范，使用 PascalCase 命名类和方法
+- **架构原则**: 保持控制器轻量，业务逻辑放在 Services 层
+- **错误处理**: 使用结构化异常处理，记录详细的错误日志
+- **文档更新**: 及时更新 README 和 API 文档
+- **依赖管理**: 谨慎添加新的 NuGet 包依赖
+
+### 项目架构
+
+```
+OrchestrationApi/
+├── Controllers/        # API 控制器层
+├── Services/           # 业务逻辑层
+│   ├── Core/          # 核心服务接口和实现
+│   ├── Providers/     # AI 服务商实现
+│   └── Background/    # 后台服务
+├── Models/            # 数据模型和 DTO
+├── Configuration/     # 配置相关类
+├── Middleware/        # 自定义中间件
+└── wwwroot/          # 静态文件（管理界面）
+```
 
 ## 📄 许可证
 
 本项目采用 MIT 许可证 - 详见 [LICENSE](LICENSE) 文件。
 
+MIT 许可证允许您自由使用、修改和分发本软件，包括商业用途。
+
 ## 📞 支持与反馈
 
-- **文档**: 查看项目文档和 FAQ
-- **问题反馈**: 提交 GitHub Issue
-- **功能建议**: 通过 Issue 提出新功能需求
-- **社区讨论**: 参与 GitHub Discussions
+### 获取帮助
+- **项目文档**: 查看完整的 README 和代码注释
+- **问题排查**: 参考故障排除章节
+- **配置指南**: 查看详细的配置说明
 
-## 🗓️ 更新日志
+### 反馈渠道
+- **Bug 报告**: 通过 GitHub Issues 提交问题报告
+- **功能建议**: 通过 Issues 提出新功能需求
+- **使用问题**: 在 Issues 中提问使用相关问题
+- **安全问题**: 通过私有方式报告安全漏洞
 
-### v2.0.0 (2024-12-20)
-- 升级到 .NET 9
-- 新增 Web 管理界面
-- 完善的 Docker 支持
-- 增强的监控和日志功能
+### 社区参与
+- **代码贡献**: 欢迎提交 Pull Request
+- **文档改进**: 帮助完善项目文档
+- **测试反馈**: 在不同环境下测试并提供反馈
+- **经验分享**: 分享使用经验和最佳实践
 
-### v1.0.0 (2024-12-01)
-- 初始版本发布
-- 支持 OpenAI、Anthropic、Google Gemini
-- 基础管理功能
-- OpenAI API 兼容
+## 🗓️ 版本历史
 
----
+### v1.0.0 - 初始版本
+- ✅ .NET 9 框架
+- ✅ 全新的 Web 管理界面
+- ✅ 支持 OpenAI 兼容和支持 Gemini 原生API
+- ✅ 完善的 Docker 容器化部署
+- ✅ 增强的监控和日志功能
+- ✅ 智能密钥健康检查
+- ✅ 多重故障转移机制
 
-**OrchestrationApi** - 让多 AI 服务商管理变得简单高效！ 🚀
+### 技术栈
+- [.NET 9](https://dotnet.microsoft.com/) - 现代化的跨平台开发框架
+- [SqlSugar](https://www.donet5.com/Home/Doc) - 高性能 ORM 框架
+- [Serilog](https://serilog.net/) - 结构化日志记录库
+- [Newtonsoft.Json](https://www.newtonsoft.com/json) - JSON 序列化库
