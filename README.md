@@ -341,7 +341,7 @@ curl -X GET http://localhost:5000/v1beta/models \
 version: '3.8'
 services:
   orchestration-api:
-    image: orchestration-api:latest
+    image: ghcr.io/xiaoyutx94/orchestrationapi:latest
     container_name: orchestration-api
     ports:
       - "5000:5000"
@@ -369,7 +369,7 @@ services:
 version: '3.8'
 services:
   orchestration-api:
-    image: orchestration-api:latest
+    image: ghcr.io/xiaoyutx94/orchestrationapi:latest
     container_name: orchestration-api
     ports:
       - "5000:5000"
