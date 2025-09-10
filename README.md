@@ -2,6 +2,15 @@
 
 一个基于 .NET 9 的企业级多服务商 AI API 代理服务，提供统一的 OpenAI 兼容接口，支持智能路由、故障转移、负载均衡等企业级功能。
 
+<img width="1570" height="915" alt="image" src="https://github.com/user-attachments/assets/875e6f4c-cc54-49a5-a47c-176d389ea181" />
+
+<img width="1054" height="875" alt="image" src="https://github.com/user-attachments/assets/afbab540-4cd4-4c6c-9ede-27e928f32e59" />
+
+<img width="1237" height="873" alt="image" src="https://github.com/user-attachments/assets/e0f7b07f-7a38-4acd-84dc-dc448a62c066" />
+
+<img width="1542" height="779" alt="image" src="https://github.com/user-attachments/assets/eddd5171-5d01-4ade-91d9-de0a1e032155" />
+
+
 ## 🚀 核心特性（Claude帮我吹的，但意思差不多）
 
 ### 多服务商支持
