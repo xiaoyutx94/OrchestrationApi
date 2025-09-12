@@ -22,12 +22,18 @@ public class AdminController : ControllerBase
     private readonly IKeyManager _keyManager;
     private readonly IRequestLogger _requestLogger;
     private readonly ILogger<AdminController> _logger;
+    private readonly IVersionService _versionService;
 
-    public AdminController(IKeyManager keyManager, IRequestLogger requestLogger, ILogger<AdminController> logger)
+    public AdminController(
+        IKeyManager keyManager, 
+        IRequestLogger requestLogger, 
+        ILogger<AdminController> logger,
+        IVersionService versionService)
     {
         _keyManager = keyManager;
         _requestLogger = requestLogger;
         _logger = logger;
+        _versionService = versionService;
     }
 
     /// <summary>
@@ -832,19 +838,8 @@ public class AdminController : ControllerBase
             var startTime = process.StartTime;
             var uptime = DateTime.Now - startTime;
 
-            // 获取内存使用情况
-            var workingSet = process.WorkingSet64;
-            var memoryUsageMB = workingSet / (1024 * 1024);
-
-            // 获取系统总内存来计算内存使用百分比
-            var totalMemoryMB = GetTotalMemoryMB();
-            var memoryUsagePercent = totalMemoryMB > 0 ? (double)memoryUsageMB / totalMemoryMB * 100 : 0;
-
-            // 获取CPU使用率（使用性能计数器的简化版本）
-            var cpuUsage = GetCpuUsageLight();
-
             // 获取版本信息
-            var version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "1.0.0";
+            var version = _versionService.GetCurrentVersion();
 
             // 获取系统统计信息
             var statistics = await GetSystemStatisticsAsync();
@@ -854,9 +849,6 @@ public class AdminController : ControllerBase
                 status = "healthy",
                 timestamp = DateTime.Now,
                 version = version,
-                // 前端期望的字段名
-                cpu_usage = cpuUsage,
-                memory_usage = Math.Round(memoryUsagePercent, 2), // 使用百分比
                 uptime = (long)uptime.TotalSeconds, // 秒格式
                 // 分组统计信息（前端期望的字段）
                 total_groups = ((dynamic)statistics).total_groups,
@@ -867,12 +859,9 @@ public class AdminController : ControllerBase
                 successful_requests = ((dynamic)statistics).successful_requests,
                 failed_requests = ((dynamic)statistics).failed_requests,
                 start_time = startTime,
-                // 详细的系统信息
+                // 系统信息
                 system = new
                 {
-                    cpu_usage_percent = cpuUsage,
-                    memory_usage_mb = memoryUsageMB,
-                    memory_usage_formatted = $"{memoryUsageMB:F1} MB",
                     processor_count = Environment.ProcessorCount,
                     machine_name = Environment.MachineName,
                     os_version = Environment.OSVersion.ToString(),
@@ -904,7 +893,7 @@ public class AdminController : ControllerBase
             {
                 status = "unhealthy",
                 timestamp = DateTime.Now,
-                version = "1.0.0",
+                version = _versionService.GetCurrentVersion(),
                 error = ex.Message,
                 // 默认统计值
                 total_groups = 0,
@@ -914,8 +903,6 @@ public class AdminController : ControllerBase
                 total_requests = 0,
                 successful_requests = 0,
                 failed_requests = 0,
-                cpu_usage = 0.0,
-                memory_usage = 0.0,
                 uptime = 0L,
                 start_time = DateTime.Now,
                 services = new
@@ -929,66 +916,6 @@ public class AdminController : ControllerBase
         }
     }
 
-    private double GetCpuUsageLight()
-    {
-        try
-        {
-            using var process = System.Diagnostics.Process.GetCurrentProcess();
-
-            // 获取当前进程的CPU时间，这个方法不会阻塞
-            var totalCpuTime = process.TotalProcessorTime.TotalMilliseconds;
-            var uptime = (DateTime.Now - process.StartTime).TotalMilliseconds;
-
-            // 计算CPU使用率的估算值
-            var cpuUsage = (totalCpuTime / (uptime * Environment.ProcessorCount)) * 100;
-
-            return Math.Round(Math.Min(cpuUsage, 100), 2);
-        }
-        catch
-        {
-            return 0.0; // 如果无法获取CPU使用率，返回0
-        }
-    }
-
-    private long GetTotalMemoryMB()
-    {
-        try
-        {
-            // 在Windows平台上使用性能计数器
-            if (OperatingSystem.IsWindows())
-            {
-                using var pc = new System.Diagnostics.PerformanceCounter("Memory", "Available MBytes");
-                var availableMB = pc.NextValue();
-
-                // 估算总内存（假设可用内存是总内存的一部分）
-                var totalMemoryEstimate = (long)(availableMB / 0.7); // 假设70%可用率
-                return Math.Max(totalMemoryEstimate, 4096); // 至少4GB
-            }
-            else
-            {
-                // 非Windows平台使用GC信息估算
-                var gcMemory = GC.GetTotalMemory(false) / (1024 * 1024);
-                return Math.Max(gcMemory * 10, 4096); // 粗略估算
-            }
-        }
-        catch
-        {
-            try
-            {
-                // 备用方法：通过当前进程内存使用量估算
-                using var process = System.Diagnostics.Process.GetCurrentProcess();
-                var workingSetMB = process.WorkingSet64 / (1024 * 1024);
-
-                // 假设当前进程占用系统内存的5%-50%，估算总内存
-                var estimatedTotal = workingSetMB * 20; // 假设当前进程占5%
-                return Math.Max(estimatedTotal, 4096); // 至少4GB
-            }
-            catch
-            {
-                return 8192; // 默认假设8GB内存
-            }
-        }
-    }
 
     private async Task<object> GetSystemStatisticsAsync()
     {
@@ -1517,6 +1444,107 @@ public class AdminController : ControllerBase
                 error = ex.Message,
                 operation_time = DateTime.Now
             });
+        }
+    }
+
+    /// <summary>
+    /// 获取所有服务商配置的模型别名和模型名称（去重）
+    /// </summary>
+    [HttpGet("models/all-aliases")]
+    public async Task<IActionResult> GetAllConfiguredAliases()
+    {
+        try
+        {
+            var groups = await _keyManager.GetAllGroupsAsync();
+            var allModelNames = new HashSet<string>();
+
+            foreach (var group in groups.Where(g => g.Enabled))
+            {
+                // 优先获取模型别名映射中的别名（key部分）
+                if (!string.IsNullOrEmpty(group.ModelAliases))
+                {
+                    try
+                    {
+                        var aliases = JsonConvert.DeserializeObject<Dictionary<string, string>>(group.ModelAliases);
+                        if (aliases != null)
+                        {
+                            foreach (var aliasKey in aliases.Keys)
+                            {
+                                if (!string.IsNullOrWhiteSpace(aliasKey))
+                                {
+                                    allModelNames.Add(aliasKey.Trim());
+                                }
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        // 忽略解析失败的情况
+                    }
+                }
+
+                // 然后获取配置的实际模型名称
+                // if (!string.IsNullOrEmpty(group.Models))
+                // {
+                //     try
+                //     {
+                //         var modelList = JsonConvert.DeserializeObject<List<string>>(group.Models) ?? new List<string>();
+                //         foreach (var model in modelList)
+                //         {
+                //             if (!string.IsNullOrWhiteSpace(model))
+                //             {
+                //                 allModelNames.Add(model.Trim());
+                //             }
+                //         }
+                //     }
+                //     catch
+                //     {
+                //         // 如果解析失败，尝试作为单个字符串处理
+                //         if (!string.IsNullOrWhiteSpace(group.Models))
+                //         {
+                //             allModelNames.Add(group.Models.Trim());
+                //         }
+                //     }
+                // }
+
+                // 也包含别名映射中的原始模型名称（value部分）
+                if (!string.IsNullOrEmpty(group.ModelAliases))
+                {
+                    try
+                    {
+                        var aliases = JsonConvert.DeserializeObject<Dictionary<string, string>>(group.ModelAliases);
+                        if (aliases != null)
+                        {
+                            foreach (var originalModel in aliases.Values)
+                            {
+                                if (!string.IsNullOrWhiteSpace(originalModel))
+                                {
+                                    allModelNames.Add(originalModel.Trim());
+                                }
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        // 忽略解析失败的情况
+                    }
+                }
+            }
+
+            // 排序并返回
+            var sortedModelNames = allModelNames.OrderBy(m => m).ToList();
+
+            return Ok(new
+            {
+                success = true,
+                aliases = sortedModelNames,
+                total_count = sortedModelNames.Count
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "获取所有配置的模型别名和模型名称时发生异常");
+            return BadRequest(new { success = false, error = ex.Message });
         }
     }
 

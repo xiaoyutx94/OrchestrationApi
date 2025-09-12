@@ -35,7 +35,7 @@
 - **函数调用**: 完整的 Function Calling 和 Tools 支持
 - **参数透传**: 支持所有原生参数，包括 temperature、top_p、max_tokens 等
 
-### 企业级管理功能
+### 核心管理功能
 - **现代化 Web 管理界面**: 响应式设计的管理仪表板
 - **分组管理**: 灵活的服务商分组配置和管理
 - **代理密钥系统**: 多级代理密钥管理和权限控制
@@ -50,6 +50,22 @@
 - **Docker 原生支持**: 完整的容器化部署方案
 - **数据库支持**: 支持 SQLite（开发）和 MySQL（生产）
 - **配置热重载**: 支持动态配置更新
+
+## 🗓️ 版本历史
+
+### v1.0.1
+- ✅ 优化模型别名填写方式，支持选择系统中已经录入的别名
+- ✅ 增加系统版本检测功能，发布新版本后有升级提示
+- ✅ 精简无用代码逻辑和配置参数
+
+### v1.0.0 - 初始版本
+- ✅ .NET 9 框架
+- ✅ 全新的 Web 管理界面
+- ✅ 支持 OpenAI 兼容和支持 Gemini 原生API
+- ✅ 完善的 Docker 容器化部署
+- ✅ 增强的监控和日志功能
+- ✅ 智能密钥健康检查
+- ✅ 多重故障转移机制
 
 ## 📋 系统要求
 
@@ -79,14 +95,6 @@ docker-compose up -d
 # 查看服务状态
 docker-compose logs -f orchestration-api
 ```
-
-3. **访问服务**
-- 初始用户名密码：admin/admin123
-- 管理界面: http://localhost:5000/dashboard
-- 登录页面: http://localhost:5000/login
-- 日志查看: http://localhost:5000/logs
-- API 文档: http://localhost:5000/swagger（开发环境）
-- 健康检查: http://localhost:5000/health
 
 ### 本地开发
 
@@ -118,6 +126,20 @@ dotnet watch run
 
 ## 🔧 配置指南
 
+### 管理界面访问
+
+服务启动后，可通过以下地址访问管理功能：
+
+- **管理仪表板**: http://localhost:5000/dashboard
+- **登录页面**: http://localhost:5000/login  
+- **日志查看**: http://localhost:5000/logs
+- **健康检查**: http://localhost:5000/health
+- **API文档**: http://localhost:5000/swagger (开发环境)
+
+默认登录凭据：
+- 用户名：admin
+- 密码：admin123
+
 ### 基础配置 (appsettings.json)
 
 ```json
@@ -141,12 +163,15 @@ dotnet watch run
       "TablePrefix": "orch_"
     },
     "Global": {
-      "Timeout": 60,
       "ConnectionTimeout": 30,
       "ResponseTimeout": 300,
-      "Retries": 3,
-      "BalancePolicy": "round_robin",
       "MaxProviderRetries": 3
+    },
+    "Gemini": {
+      "StreamingTimeout": 300,
+      "NonStreamingTimeout": 180,
+      "DataTimeoutSeconds": 30,
+      "MaxDataIntervalSeconds": 30
     },
     "RequestLogging": {
       "Enabled": true,
@@ -168,21 +193,12 @@ dotnet watch run
 #### Gemini 专用配置
 ```json
 {
-  "Gemini": {
-    "StreamingTimeout": 300,
-    "NonStreamingTimeout": 180,
-    "ConnectionTimeout": 30,
-    "QualityCheck": {
-      "Enabled": true,
-      "BufferSize": 10,
-      "DetectEmptyResponse": true,
-      "DetectTruncation": true
-    },
-    "AutoRetry": {
-      "Enabled": true,
-      "MaxRetries": 2,
-      "RetryOnEmpty": true,
-      "RetryOnTruncation": true
+  "OrchestrationApi": {
+    "Gemini": {
+      "StreamingTimeout": 300,
+      "NonStreamingTimeout": 180,
+      "DataTimeoutSeconds": 30,
+      "MaxDataIntervalSeconds": 30
     }
   }
 }
@@ -230,6 +246,12 @@ dotnet watch run
 
 
 ## 📖 API 使用指南
+
+### 认证说明
+
+- **OpenAI 兼容 API**: 使用 `Authorization: Bearer your-proxy-key` 头部认证
+- **Anthropic 原生 API**: 使用 `Authorization: Bearer your-proxy-key` 头部认证  
+- **Gemini 原生 API**: 使用 `x-goog-api-key: your-proxy-key` 头部认证
 
 ### OpenAI 兼容 API
 
@@ -301,7 +323,7 @@ curl -X POST http://localhost:5000/v1/chat/completions \
 ### Anthropic Claude 原生 API
 
 ```bash
-curl -X POST http://localhost:5000/v1/messages \
+curl -X POST http://localhost:5000/anthropic/v1/messages \
   -H "Authorization: Bearer your-proxy-key" \
   -H "Content-Type: application/json" \
   -d '{
@@ -316,8 +338,23 @@ curl -X POST http://localhost:5000/v1/messages \
 ### Google Gemini 原生 API
 
 ```bash
+# 非流式生成
 curl -X POST "http://localhost:5000/v1beta/models/gemini-pro:generateContent" \
-  -H "Authorization: Bearer your-proxy-key" \
+  -H "x-goog-api-key: your-proxy-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "contents": [
+      {
+        "parts": [
+          {"text": "Hello, Gemini!"}
+        ]
+      }
+    ]
+  }'
+
+# 流式生成
+curl -X POST "http://localhost:5000/v1beta/models/gemini-pro:streamGenerateContent" \
+  -H "x-goog-api-key: your-proxy-key" \
   -H "Content-Type: application/json" \
   -d '{
     "contents": [
@@ -337,9 +374,13 @@ curl -X POST "http://localhost:5000/v1beta/models/gemini-pro:generateContent" \
 curl -X GET http://localhost:5000/v1/models \
   -H "Authorization: Bearer your-proxy-key"
 
+# Anthropic 格式
+curl -X GET http://localhost:5000/anthropic/v1/models \
+  -H "Authorization: Bearer your-proxy-key"
+
 # Gemini 格式
 curl -X GET http://localhost:5000/v1beta/models \
-  -H "Authorization: Bearer your-proxy-key"
+  -H "x-goog-api-key: your-proxy-key"
 ```
 
 ## 🐳 Docker 部署
@@ -520,17 +561,6 @@ MIT 许可证允许您自由使用、修改和分发本软件，包括商业用�
 - **文档改进**: 帮助完善项目文档
 - **测试反馈**: 在不同环境下测试并提供反馈
 - **经验分享**: 分享使用经验和最佳实践
-
-## 🗓️ 版本历史
-
-### v1.0.0 - 初始版本
-- ✅ .NET 9 框架
-- ✅ 全新的 Web 管理界面
-- ✅ 支持 OpenAI 兼容和支持 Gemini 原生API
-- ✅ 完善的 Docker 容器化部署
-- ✅ 增强的监控和日志功能
-- ✅ 智能密钥健康检查
-- ✅ 多重故障转移机制
 
 ### 技术栈
 - [.NET 9](https://dotnet.microsoft.com/) - 现代化的跨平台开发框架

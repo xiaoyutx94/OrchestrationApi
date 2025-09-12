@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using Newtonsoft.Json;
 using System.Text;
 using System.Net.Http.Headers;
+using System.Diagnostics;
 
 namespace OrchestrationApi.Services.Providers;
 
@@ -132,9 +133,16 @@ public class AnthropicProvider : ILLMProvider
             var proxyConfiguration = ConvertToProxyConfiguration(config.ProxyConfig);
             var httpClient = _proxyHttpClientService.CreateHttpClient(proxyConfiguration, connectionTimeoutSeconds);
             
+            // 开始计时
+            var stopwatch = Stopwatch.StartNew();
+            
             var response = await httpClient.SendAsync(request, 
                 isStreaming ? HttpCompletionOption.ResponseHeadersRead : HttpCompletionOption.ResponseContentRead, 
                 combinedCts.Token);
+
+            // 停止计时
+            stopwatch.Stop();
+            var elapsedMs = stopwatch.ElapsedMilliseconds;
 
             var responseHeaders = new Dictionary<string, string>();
             foreach (var header in response.Headers.Concat(response.Content.Headers))
@@ -144,6 +152,9 @@ public class AnthropicProvider : ILLMProvider
 
             if (response.IsSuccessStatusCode)
             {
+                _logger.LogDebug("Anthropic HTTP请求成功，状态码: {StatusCode}, 耗时: {ElapsedMs}ms, 分组: {GroupId}({GroupName})",
+                    (int)response.StatusCode, elapsedMs, config.GroupId ?? "未知", config.GroupName ?? "未知");
+
                 var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
                 return new ProviderHttpResponse
                 {
@@ -157,6 +168,9 @@ public class AnthropicProvider : ILLMProvider
             {
                 var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
                 var (shouldRetry, shouldTryNextKey, errorMessage) = CheckErrorResponse((int)response.StatusCode, errorContent);
+                
+                _logger.LogWarning("Anthropic HTTP请求失败，状态码: {StatusCode}, 耗时: {ElapsedMs}ms, 错误: {Error}, 分组: {GroupId}({GroupName})",
+                    (int)response.StatusCode, elapsedMs, errorMessage, config.GroupId ?? "未知", config.GroupName ?? "未知");
                 
                 return new ProviderHttpResponse
                 {

@@ -17,6 +17,7 @@ public class DatabaseConfiguration
         var dbConfig = configuration.GetSection("OrchestrationApi:Database");
         var dbType = dbConfig.GetValue<string>("Type", "sqlite");
         var connectionString = GetConnectionString(dbConfig, dbType);
+        var tablePrefix = dbConfig.GetValue<string>("TablePrefix", "orch_");
 
         // 配置SqlSugar
         services.AddScoped<ISqlSugarClient>(provider =>
@@ -38,11 +39,40 @@ public class DatabaseConfiguration
                 };
             }
 
-            return new SqlSugarClient(config);
+            var client = new SqlSugarClient(config);
+            
+            // 配置表前缀
+            ConfigureTablePrefix(client, tablePrefix);
+            
+            return client;
         });
 
         // 注册数据库初始化服务
         services.AddScoped<IDatabaseInitializer, DatabaseInitializer>();
+    }
+
+    /// <summary>
+    /// 配置表前缀
+    /// </summary>
+    private static void ConfigureTablePrefix(SqlSugarClient client, string tablePrefix)
+    {
+        // 确保前缀以下划线结尾
+        if (!string.IsNullOrEmpty(tablePrefix) && !tablePrefix.EndsWith("_"))
+        {
+            tablePrefix += "_";
+        }
+
+        // 配置所有实体的表名前缀
+        client.CodeFirst.SetStringDefaultLength(200);
+        
+        // 使用 CodeFirst 配置表名映射
+        client.CodeFirst.As<GroupConfig>($"{tablePrefix}groups");
+        client.CodeFirst.As<ProxyKey>($"{tablePrefix}proxy_keys");
+        client.CodeFirst.As<KeyValidation>($"{tablePrefix}key_validation");
+        client.CodeFirst.As<KeyUsageStats>($"{tablePrefix}key_usage_stats");
+        client.CodeFirst.As<RequestLog>($"{tablePrefix}request_logs");
+        client.CodeFirst.As<User>($"{tablePrefix}users");
+        client.CodeFirst.As<UserSession>($"{tablePrefix}sessions");
     }
 
     /// <summary>
@@ -91,6 +121,7 @@ public class DatabaseInitializer : IDatabaseInitializer
     private readonly ISqlSugarClient _db;
     private readonly ILogger<DatabaseInitializer> _logger;
     private readonly IConfiguration _configuration;
+    private readonly string _tablePrefix;
 
     public DatabaseInitializer(ISqlSugarClient db, ILogger<DatabaseInitializer> logger, 
         IConfiguration configuration)
@@ -98,6 +129,8 @@ public class DatabaseInitializer : IDatabaseInitializer
         _db = db;
         _logger = logger;
         _configuration = configuration;
+        var prefix = _configuration.GetValue<string>("OrchestrationApi:Database:TablePrefix", "orch_");
+        _tablePrefix = !string.IsNullOrEmpty(prefix) && !prefix.EndsWith("_") ? prefix + "_" : prefix ?? "orch_";
     }
 
     /// <summary>
@@ -314,10 +347,10 @@ public class DatabaseInitializer : IDatabaseInitializer
     {
         var dbType = _db.CurrentConnectionConfig.DbType;
         
-        string createSql = dbType switch
-        {
-            DbType.Sqlite => @"
-                CREATE TABLE IF NOT EXISTS orch_groups (
+            string createSql = dbType switch
+            {
+                DbType.Sqlite => $@"
+                CREATE TABLE IF NOT EXISTS {_tablePrefix}groups (
                     id TEXT PRIMARY KEY,
                     group_name TEXT NOT NULL,
                     provider_type TEXT NOT NULL,
@@ -340,8 +373,8 @@ public class DatabaseInitializer : IDatabaseInitializer
                     updated_at TEXT NOT NULL,
                     is_deleted INTEGER DEFAULT 0
                 )",
-            DbType.MySql => @"
-                CREATE TABLE IF NOT EXISTS orch_groups (
+            DbType.MySql => $@"
+                CREATE TABLE IF NOT EXISTS {_tablePrefix}groups (
                     id VARCHAR(100) PRIMARY KEY,
                     group_name VARCHAR(100) NOT NULL,
                     provider_type VARCHAR(50) NOT NULL,
@@ -379,8 +412,8 @@ public class DatabaseInitializer : IDatabaseInitializer
         
         string createSql = dbType switch
         {
-            DbType.Sqlite => @"
-                CREATE TABLE IF NOT EXISTS orch_key_validation (
+            DbType.Sqlite => $@"
+                CREATE TABLE IF NOT EXISTS {_tablePrefix}key_validation (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     group_id TEXT,
                     api_key_hash TEXT NOT NULL,
@@ -392,8 +425,8 @@ public class DatabaseInitializer : IDatabaseInitializer
                     last_validated_at TEXT,
                     created_at TEXT NOT NULL
                 )",
-            DbType.MySql => @"
-                CREATE TABLE IF NOT EXISTS orch_key_validation (
+            DbType.MySql => $@"
+                CREATE TABLE IF NOT EXISTS {_tablePrefix}key_validation (
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     group_id VARCHAR(100),
                     api_key_hash VARCHAR(64) NOT NULL,
@@ -420,8 +453,8 @@ public class DatabaseInitializer : IDatabaseInitializer
         
         string createSql = dbType switch
         {
-            DbType.Sqlite => @"
-                CREATE TABLE IF NOT EXISTS orch_request_logs (
+            DbType.Sqlite => $@"
+                CREATE TABLE IF NOT EXISTS {_tablePrefix}request_logs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     request_id TEXT NOT NULL,
                     proxy_key_id INTEGER,
@@ -448,8 +481,8 @@ public class DatabaseInitializer : IDatabaseInitializer
                     is_streaming INTEGER DEFAULT 0,
                     created_at TEXT NOT NULL
                 )",
-            DbType.MySql => @"
-                CREATE TABLE IF NOT EXISTS orch_request_logs (
+            DbType.MySql => $@"
+                CREATE TABLE IF NOT EXISTS {_tablePrefix}request_logs (
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     request_id VARCHAR(50) NOT NULL,
                     proxy_key_id INT,
@@ -491,8 +524,8 @@ public class DatabaseInitializer : IDatabaseInitializer
         
         string createSql = dbType switch
         {
-            DbType.Sqlite => @"
-                CREATE TABLE IF NOT EXISTS orch_key_usage_stats (
+            DbType.Sqlite => $@"
+                CREATE TABLE IF NOT EXISTS {_tablePrefix}key_usage_stats (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     group_id TEXT NOT NULL,
                     api_key_hash TEXT NOT NULL,
@@ -502,8 +535,8 @@ public class DatabaseInitializer : IDatabaseInitializer
                     updated_at TEXT NOT NULL,
                     UNIQUE(group_id, api_key_hash)
                 )",
-            DbType.MySql => @"
-                CREATE TABLE IF NOT EXISTS orch_key_usage_stats (
+            DbType.MySql => $@"
+                CREATE TABLE IF NOT EXISTS {_tablePrefix}key_usage_stats (
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     group_id VARCHAR(100) NOT NULL,
                     api_key_hash VARCHAR(64) NOT NULL,
@@ -521,12 +554,12 @@ public class DatabaseInitializer : IDatabaseInitializer
         // 创建索引以提高查询性能
         string createIndexSql = dbType switch
         {
-            DbType.Sqlite => @"
+            DbType.Sqlite => $@"
                 CREATE INDEX IF NOT EXISTS idx_key_usage_stats_group_key 
-                ON orch_key_usage_stats(group_id, api_key_hash)",
-            DbType.MySql => @"
+                ON {_tablePrefix}key_usage_stats(group_id, api_key_hash)",
+            DbType.MySql => $@"
                 CREATE INDEX IF NOT EXISTS idx_key_usage_stats_group_key 
-                ON orch_key_usage_stats(group_id, api_key_hash)",
+                ON {_tablePrefix}key_usage_stats(group_id, api_key_hash)",
             _ => throw new NotSupportedException($"不支持的数据库类型: {dbType}")
         };
 
@@ -633,15 +666,15 @@ public class DatabaseInitializer : IDatabaseInitializer
         
         string createSql = dbType switch
         {
-            DbType.Sqlite => @"
-                CREATE TABLE IF NOT EXISTS orch_database_versions (
+            DbType.Sqlite => $@"
+                CREATE TABLE IF NOT EXISTS {_tablePrefix}database_versions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     version TEXT NOT NULL UNIQUE,
                     applied_at TEXT NOT NULL,
                     description TEXT
                 )",
-            DbType.MySql => @"
-                CREATE TABLE IF NOT EXISTS orch_database_versions (
+            DbType.MySql => $@"
+                CREATE TABLE IF NOT EXISTS {_tablePrefix}database_versions (
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     version VARCHAR(20) NOT NULL UNIQUE,
                     applied_at DATETIME NOT NULL,
@@ -661,7 +694,7 @@ public class DatabaseInitializer : IDatabaseInitializer
     {
         try
         {
-            var sql = "SELECT version FROM orch_database_versions ORDER BY applied_at DESC LIMIT 1";
+            var sql = $"SELECT version FROM {_tablePrefix}database_versions ORDER BY applied_at DESC LIMIT 1";
             var version = await _db.Ado.GetStringAsync(sql);
             return string.IsNullOrEmpty(version) ? "0.0.0" : version;
         }
@@ -681,8 +714,8 @@ public class DatabaseInitializer : IDatabaseInitializer
         
         string insertSql = dbType switch
         {
-            DbType.Sqlite => "INSERT OR IGNORE INTO orch_database_versions (version, applied_at, description) VALUES (@version, @applied_at, @description)",
-            DbType.MySql => "INSERT IGNORE INTO orch_database_versions (version, applied_at, description) VALUES (@version, @applied_at, @description)",
+            DbType.Sqlite => $"INSERT OR IGNORE INTO {_tablePrefix}database_versions (version, applied_at, description) VALUES (@version, @applied_at, @description)",
+            DbType.MySql => $"INSERT IGNORE INTO {_tablePrefix}database_versions (version, applied_at, description) VALUES (@version, @applied_at, @description)",
             _ => throw new NotSupportedException($"不支持的数据库类型: {dbType}")
         };
 
@@ -881,7 +914,7 @@ public class DatabaseInitializer : IDatabaseInitializer
     /// </summary>
     private async Task AddLastStatusCodeToKeyValidation()
     {
-        const string tableName = "orch_key_validation";
+        var tableName = $"{_tablePrefix}key_validation";
         const string columnName = "last_status_code";
         
         if (await TableExists(tableName) && !await ColumnExists(tableName, columnName))
@@ -909,7 +942,7 @@ public class DatabaseInitializer : IDatabaseInitializer
     /// </summary>
     private async Task AddIsDeletedToGroupConfig()
     {
-        const string tableName = "orch_groups";
+        var tableName = $"{_tablePrefix}groups";
         const string columnName = "is_deleted";
         
         if (await TableExists(tableName) && !await ColumnExists(tableName, columnName))
@@ -937,7 +970,7 @@ public class DatabaseInitializer : IDatabaseInitializer
     /// </summary>
     private async Task AddHeadersToGroupConfig()
     {
-        const string tableName = "orch_groups";
+        var tableName = $"{_tablePrefix}groups";
         const string columnName = "headers";
         
         if (await TableExists(tableName) && !await ColumnExists(tableName, columnName))
@@ -965,7 +998,7 @@ public class DatabaseInitializer : IDatabaseInitializer
     /// </summary>
     private async Task AddProxyConfigToGroupConfig()
     {
-        const string tableName = "orch_groups";
+        var tableName = $"{_tablePrefix}groups";
         
         // 添加 proxy_enabled 字段
         const string proxyEnabledColumn = "proxy_enabled";

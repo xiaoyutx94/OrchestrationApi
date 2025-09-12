@@ -15,16 +15,19 @@ public class HealthController : ControllerBase
     private readonly ISqlSugarClient _db;
     private readonly ILogger<HealthController> _logger;
     private readonly IConfiguration _configuration;
+    private readonly IVersionService _versionService;
     private static readonly DateTime _startTime = DateTime.Now;
 
     public HealthController(
         ISqlSugarClient db, 
         ILogger<HealthController> logger, 
-        IConfiguration configuration)
+        IConfiguration configuration,
+        IVersionService versionService)
     {
         _db = db;
         _logger = logger;
         _configuration = configuration;
+        _versionService = versionService;
     }
 
     /// <summary>
@@ -43,7 +46,7 @@ public class HealthController : ControllerBase
                 status = "healthy",
                 timestamp = DateTime.Now,
                 uptime = uptime.ToString(@"dd\.hh\:mm\:ss"),
-                version = "1.0.0",
+                version = _versionService.GetCurrentVersion(),
                 environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Production"
             });
         }
@@ -83,15 +86,6 @@ public class HealthController : ControllerBase
             }
 
 
-            // 内存使用检查
-            var process = System.Diagnostics.Process.GetCurrentProcess();
-            var memoryUsageMB = process.WorkingSet64 / 1024 / 1024;
-            healthChecks["memory"] = new 
-            { 
-                status = memoryUsageMB < 1024 ? "healthy" : "warning", 
-                usage_mb = memoryUsageMB,
-                message = $"内存使用: {memoryUsageMB}MB"
-            };
 
             // 磁盘空间检查
             var driveInfo = new DriveInfo(Directory.GetCurrentDirectory());
@@ -111,7 +105,7 @@ public class HealthController : ControllerBase
                 status = overallStatus,
                 timestamp = DateTime.Now,
                 uptime = uptime.ToString(@"dd\.hh\:mm\:ss"),
-                version = "1.0.0",
+                version = _versionService.GetCurrentVersion(),
                 environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Production",
                 checks = healthChecks
             });
@@ -158,5 +152,29 @@ public class HealthController : ControllerBase
     public IActionResult Live()
     {
         return Ok(new { status = "alive" });
+    }
+
+    /// <summary>
+    /// 检查版本更新
+    /// </summary>
+    [HttpGet("version")]
+    [ProducesResponseType(typeof(VersionCheckResult), 200)]
+    public async Task<IActionResult> CheckVersion()
+    {
+        try
+        {
+            var result = await _versionService.CheckForUpdatesAsync();
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "版本检查失败");
+            return StatusCode(500, new
+            {
+                error = "版本检查失败",
+                message = ex.Message,
+                current_version = _versionService.GetCurrentVersion()
+            });
+        }
     }
 }

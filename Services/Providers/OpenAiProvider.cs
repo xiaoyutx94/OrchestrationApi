@@ -3,6 +3,7 @@ using System.Text;
 using Newtonsoft.Json;
 using OrchestrationApi.Services.Core;
 using System.Net;
+using System.Diagnostics;
 
 namespace OrchestrationApi.Services.Providers;
 
@@ -228,10 +229,17 @@ public class OpenAiProvider : ILLMProvider
             var proxyConfiguration = ConvertToProxyConfiguration(config.ProxyConfig);
             var httpClient = _proxyHttpClientService.CreateHttpClient(proxyConfiguration, connectionTimeoutSeconds);
 
+            // 开始计时
+            var stopwatch = Stopwatch.StartNew();
+
             // 发送请求
             var response = await httpClient.SendAsync(request,
                 isStreaming ? HttpCompletionOption.ResponseHeadersRead : HttpCompletionOption.ResponseContentRead,
                 combinedCts.Token);
+
+            // 停止计时
+            stopwatch.Stop();
+            var elapsedMs = stopwatch.ElapsedMilliseconds;
 
             var statusCode = (int)response.StatusCode;
             var responseHeaders = response.Headers.ToDictionary(h => h.Key, h => string.Join(", ", h.Value));
@@ -247,8 +255,8 @@ public class OpenAiProvider : ILLMProvider
 
             if (response.IsSuccessStatusCode)
             {
-                _logger.LogDebug("OpenAI HTTP请求成功，状态码: {StatusCode}, API密钥: {ApiKey}, 流式: {IsStreaming}, 分组: {GroupId}({GroupName})",
-                    statusCode, MaskApiKey(apiKey), isStreaming, config.GroupId ?? "未知", config.GroupName ?? "未知");
+                _logger.LogDebug("OpenAI HTTP请求成功，状态码: {StatusCode}, 耗时: {ElapsedMs}ms, API密钥: {ApiKey}, 流式: {IsStreaming}, 分组: {GroupId}({GroupName})",
+                    statusCode, elapsedMs, MaskApiKey(apiKey), isStreaming, config.GroupId ?? "未知", config.GroupName ?? "未知");
 
                 var responseStream = await response.Content.ReadAsStreamAsync();
 
@@ -265,8 +273,8 @@ public class OpenAiProvider : ILLMProvider
                 var errorContent = await response.Content.ReadAsStringAsync();
                 var (shouldRetry, shouldTryNextKey, errorMessage) = CheckErrorResponse(statusCode, errorContent);
 
-                _logger.LogWarning("OpenAI HTTP请求失败，状态码: {StatusCode}, API密钥: {ApiKey}, 错误: {Error}, 分组: {GroupId}({GroupName})",
-                    statusCode, MaskApiKey(apiKey), errorMessage, config.GroupId ?? "未知", config.GroupName ?? "未知");
+                _logger.LogWarning("OpenAI HTTP请求失败，状态码: {StatusCode}, 耗时: {ElapsedMs}ms, API密钥: {ApiKey}, 错误: {Error}, 分组: {GroupId}({GroupName})",
+                    statusCode, elapsedMs, MaskApiKey(apiKey), errorMessage, config.GroupId ?? "未知", config.GroupName ?? "未知");
 
                 return new ProviderHttpResponse
                 {

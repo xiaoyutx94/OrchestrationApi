@@ -93,6 +93,7 @@ builder.Services.AddScoped<IKeyManager, KeyManager>();
 builder.Services.AddScoped<IProviderRouter, ProviderRouter>();
 builder.Services.AddScoped<IProviderFactory, ProviderFactory>();
 builder.Services.AddScoped<IProxyHttpClientService, ProxyHttpClientService>();
+builder.Services.AddScoped<IVersionService, VersionService>();
 builder.Services.AddHttpClient();
 
 // 注册具体的服务商

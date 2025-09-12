@@ -127,8 +127,8 @@
         </div>
 
         <!-- System Overview - 第一排 -->
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-            <!-- 系统状态 -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+            <!-- 系统状态与运行时间 -->
             <div
                 class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 hover:shadow-md transition-all duration-200">
                 <div class="flex items-center justify-between mb-4">
@@ -194,16 +194,30 @@
                 </div>
                 <div class="space-y-2">
                     <div class="flex justify-between text-sm">
-                        <span class="text-gray-500">CPU使用率</span>
-                        <span class="font-medium" x-text="formatPercentage(systemHealth.cpu_usage)">0%</span>
-                    </div>
-                    <div class="flex justify-between text-sm">
-                        <span class="text-gray-500">内存使用</span>
-                        <span class="font-medium" x-text="formatPercentage(systemHealth.memory_usage)">0%</span>
+                        <span class="text-gray-500">运行时间</span>
+                        <span class="font-medium" x-text="formatDuration(systemHealth.uptime)">-</span>
                     </div>
                     <div class="flex justify-between text-sm">
                         <span class="text-gray-500">启动时间</span>
-                        <span class="font-medium" x-text="formatDuration(systemHealth.uptime)">-</span>
+                        <span class="font-medium" x-text="formatDate(systemHealth.start_time)">-</span>
+                    </div>
+                    <div class="flex justify-between items-center text-sm">
+                        <span class="text-gray-500">版本信息</span>
+                        <div class="flex items-center space-x-2">
+                            <span class="font-medium" x-text="systemHealth.version || 'v1.0.0'">v1.0.0</span>
+                            <!-- 版本更新提示 -->
+                            <template x-if="versionInfo && versionInfo.hasNewVersion">
+                                <button 
+                                    @click="openReleaseUrl()"
+                                    class="inline-flex items-center px-2 py-1 text-xs font-medium text-blue-700 bg-blue-100 border border-blue-200 rounded-md hover:bg-blue-200 transition-colors duration-200"
+                                    :title="`有新版本 ${versionInfo.latestVersion} 可用`">
+                                    <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10"></path>
+                                    </svg>
+                                    新版本
+                                </button>
+                            </template>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -266,44 +280,6 @@
                 </div>
             </div>
 
-            <!-- 运行时间 -->
-            <div
-                class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 hover:shadow-md transition-all duration-200">
-                <div class="flex items-center justify-between mb-4">
-                    <div class="flex items-center">
-                        <div class="flex-shrink-0">
-                            <div class="w-12 h-12 bg-orange-100 rounded-lg flex items-center justify-center">
-                                <svg class="w-6 h-6 text-orange-600" fill="none" stroke="currentColor"
-                                    viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                        d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                                </svg>
-                            </div>
-                        </div>
-                        <div class="ml-4">
-                            <p class="text-sm font-medium text-gray-500">
-                                运行时间
-                            </p>
-                            <p class="text-xl font-bold text-orange-600" x-text="formatDuration(systemHealth.uptime)">
-                            </p>
-                        </div>
-                    </div>
-                </div>
-                <div class="space-y-2">
-                    <div class="flex justify-between text-sm">
-                        <span class="text-gray-500">启动时间</span>
-                        <span class="font-medium" x-text="formatDate(systemHealth.start_time)">-</span>
-                    </div>
-                    <div class="flex justify-between text-sm">
-                        <span class="text-gray-500">版本信息</span>
-                        <span class="font-medium" x-text="systemHealth.version || 'v2.2.0'">v2.2.0</span>
-                    </div>
-                    <div class="flex justify-between text-sm">
-                        <span class="text-gray-500">请求总数</span>
-                        <span class="font-medium" x-text="systemHealth.total_requests || 0">0</span>
-                    </div>
-                </div>
-            </div>
         </div>
 
         <!-- API密钥状态 - 第二排 -->
@@ -533,6 +509,12 @@
                             <option value="anthropic">Anthropic</option>
                             <option value="openrouter">OpenRouter</option> -->
                     </select>
+                    <select x-model="providerEnabledFilter" @change="filterProviders()"
+                        class="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="">所有状态</option>
+                        <option value="enabled">启用</option>
+                        <option value="disabled">禁用</option>
+                    </select>
                 </div>
             </div>
 
@@ -540,7 +522,7 @@
             <div class="space-y-3">
                 <template x-for="(provider, groupId) in paginatedProviders" :key="groupId">
                     <div class="border rounded-lg p-3 hover:shadow-md transition-shadow"
-                        :class="provider.healthy ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'">
+                        :class="getProviderCardClass(provider)">
                         <!-- 移动端优化的响应式布局 -->
                         <div
                             class="flex flex-col lg:flex-row lg:items-center lg:justify-between space-y-3 lg:space-y-0">
@@ -1631,18 +1613,51 @@
                                     <div class="flex items-center space-x-2 p-2 border border-gray-200 rounded-md">
                                         <div class="flex-1">
                                             <label class="block text-xs text-gray-500 mb-1">别名（客户端使用）</label>
-                                            <input type="text" x-model="mapping.alias"
-                                                :class="getDuplicateAliasClass(mapping.alias, index)"
-                                                placeholder="例如: gpt-4" />
+                                            <div class="relative" x-data="{ showAliasDropdown: false, filteredAliases: [] }"
+                                                x-init="
+                                                    filteredAliases = [...(allConfiguredAliases || [])].sort();
+                                                    $watch('mapping.alias', value => {
+                                                        if (value) {
+                                                            filteredAliases = [...(allConfiguredAliases || [])].filter(a => a.toLowerCase().includes(value.toLowerCase())).sort();
+                                                        } else {
+                                                            filteredAliases = [...(allConfiguredAliases || [])].sort();
+                                                        }
+                                                    });
+                                                ">
+                                                <input type="text" x-model="mapping.alias" @input="showAliasDropdown = true"
+                                                    @focus="showAliasDropdown = true" @blur="setTimeout(() => showAliasDropdown = false, 200)"
+                                                    :class="getDuplicateAliasClass(mapping.alias, index)"
+                                                    placeholder="输入或选择别名，例如: gpt-4" autocomplete="off">
+                                                <button type="button" @click="showAliasDropdown = !showAliasDropdown"
+                                                    class="absolute right-1 top-1 p-1 text-gray-400 hover:text-gray-600">
+                                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                            d="M19 9l-7 7-7-7"></path>
+                                                    </svg>
+                                                </button>
+                                                <div x-show="showAliasDropdown && filteredAliases.length > 0" x-cloak
+                                                    class="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-48 overflow-y-auto">
+                                                    <template x-for="alias in filteredAliases.slice(0, 50)" :key="alias">
+                                                        <div @click="mapping.alias = alias; showAliasDropdown = false"
+                                                            class="px-3 py-2 text-sm cursor-pointer hover:bg-blue-50 hover:text-blue-600"
+                                                            :class="{ 'bg-blue-100 text-blue-600': mapping.alias === alias }"
+                                                            x-text="alias"></div>
+                                                    </template>
+                                                    <div x-show="filteredAliases.length > 50"
+                                                        class="px-3 py-2 text-xs text-gray-500 border-t">
+                                                        显示前50个结果，输入更多字符以缩小范围
+                                                    </div>
+                                                </div>
+                                            </div>
                                             <div x-show="isDuplicateAlias(mapping.alias, index)"
                                                 class="text-xs text-orange-600 mt-1">
                                                 ⚠️ 此别名在当前分组中已存在
                                             </div>
                                         </div>
-                                        <div class="text-gray-400">→</div>
+                                        <div class="text-gray-400 flex items-center justify-center mt-6">→</div>
                                         <div class="flex-1">
                                             <label class="block text-xs text-gray-500 mb-1">实际模型名称</label>
-                                            <select x-model="mapping.original"
+                                            <select x-model="mapping.original" @change="suggestAliasFromSimilarity(mapping)"
                                                 class="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500">
                                                 <option value="">
                                                     请选择模型
@@ -3138,6 +3153,8 @@
                     active_keys: 0,
                     uptime: 0,
                 },
+                versionInfo: null,
+                checkingVersion: false,
                 providerStatuses: {},
                 providerModels: {},
                 selectedProvider: "",
@@ -3237,6 +3254,7 @@
                 providerSearchQuery: "",
                 providerStatusFilter: "",
                 providerTypeFilter: "",
+                providerEnabledFilter: "",
                 filteredProviders: [],
                 providerPage: 1,
                 providersPerPage: 5,
@@ -3318,6 +3336,7 @@
                 // 模型重命名相关
                 modelMappings: [],
                 showModelMappingHelp: false,
+                allConfiguredAliases: [], // 存储所有服务商配置的模型别名
 
                 // 粘贴模型映射相关
                 showPasteModelMappingModal: false,
@@ -3385,6 +3404,10 @@
                     await this.loadSystemHealth();
                     await this.loadProviderStatuses();
                     await this.loadProxyKeys();
+                    await this.loadAllConfiguredAliases();
+                    
+                    // 检查版本更新（仅在生产环境）
+                    await this.checkVersion();
 
                     // 加载密钥状态数据，确保首次启动时能正确显示密钥数量
                     await this.loadKeyStatus();
@@ -3449,6 +3472,31 @@
                         console.error('Authentication check error:', error);
                         localStorage.removeItem('authToken');
                         return false;
+                    }
+                },
+
+                // 版本检测相关函数
+                async checkVersion() {
+                    if (this.checkingVersion) return;
+                    
+                    this.checkingVersion = true;
+                    try {
+                        const response = await fetch('/health/version');
+                        if (response.ok) {
+                            this.versionInfo = await response.json();
+                        } else {
+                            console.warn('版本检查失败:', response.status);
+                        }
+                    } catch (error) {
+                        console.error('版本检查错误:', error);
+                    } finally {
+                        this.checkingVersion = false;
+                    }
+                },
+
+                openReleaseUrl() {
+                    if (this.versionInfo && this.versionInfo.releaseUrl) {
+                        window.open(this.versionInfo.releaseUrl, '_blank');
                     }
                 },
 
@@ -3638,6 +3686,32 @@
                 async refreshProviderHealth() {
                     await this.loadProviderStatuses();
                     this.lastUpdate = new Date();
+                },
+
+                // 加载所有配置的模型别名
+                async loadAllConfiguredAliases() {
+                    try {
+                        const token = localStorage.getItem('authToken');
+                        if (!token) {
+                            throw new Error("未找到认证令牌");
+                        }
+
+                        const response = await fetch('/admin/models/all-aliases', {
+                            headers: {
+                                'Authorization': `Bearer ${token}`
+                            }
+                        });
+
+                        if (response.ok) {
+                            const data = await response.json();
+                            this.allConfiguredAliases = data.aliases || [];
+                            console.log('已加载所有配置的模型别名:', this.allConfiguredAliases.length, '个');
+                        } else {
+                            console.error('加载所有配置别名失败:', response.status);
+                        }
+                    } catch (error) {
+                        console.error('加载所有配置别名异常:', error);
+                    }
                 },
 
                 // 清除无效密钥
@@ -4150,6 +4224,20 @@
                         );
                     }
 
+                    // 启用状态筛选
+                    if (this.providerEnabledFilter) {
+                        providers = providers.filter(
+                            ([groupId, provider]) => {
+                                if (this.providerEnabledFilter === "enabled") {
+                                    return provider.enabled !== false;
+                                } else if (this.providerEnabledFilter === "disabled") {
+                                    return provider.enabled === false;
+                                }
+                                return true;
+                            },
+                        );
+                    }
+
                     // 转换为对象格式，保持排序顺序
                     this.filteredProviders = {};
                     providers.forEach(([groupId, provider]) => {
@@ -4159,6 +4247,21 @@
                     // 重置页码（可选）
                     if (resetPage) {
                         this.providerPage = 1;
+                    }
+                },
+
+                // 获取服务商卡片的CSS类
+                getProviderCardClass(provider) {
+                    // 首先判断是否禁用
+                    if (provider.enabled === false) {
+                        return 'border-gray-300 bg-gray-100';
+                    }
+                    
+                    // 如果启用，再判断健康状态
+                    if (provider.healthy) {
+                        return 'border-green-200 bg-green-50';
+                    } else {
+                        return 'border-red-200 bg-red-50';
                     }
                 },
 
@@ -4672,6 +4775,7 @@
                         const currentStatusFilter =
                             this.providerStatusFilter;
                         const currentTypeFilter = this.providerTypeFilter;
+                        const currentEnabledFilter = this.providerEnabledFilter;
 
                         // 处理模型列表 - 只使用文本框输入的模型（统一管理）
                         const manualModels = this.modelsText
@@ -4911,6 +5015,7 @@
                                 this.providerStatusFilter =
                                     currentStatusFilter;
                                 this.providerTypeFilter = currentTypeFilter;
+                                this.providerEnabledFilter = currentEnabledFilter;
 
                                 // 重新过滤服务商以反映更新，但不重置页面位置
                                 this.filterProviders(false);
@@ -6179,6 +6284,104 @@
                     this.modelMappings.splice(index, 1);
                 },
 
+                // 根据实际模型名称相似度从现有别名中自动选择
+                suggestAliasFromSimilarity(mapping) {
+                    if (!mapping.original || mapping.alias || !this.allConfiguredAliases || this.allConfiguredAliases.length === 0) {
+                        return; // 如果没有选择模型、已经有别名、或没有可用的别名列表，不做推荐
+                    }
+
+                    const modelName = mapping.original.toLowerCase();
+                    let bestMatch = '';
+                    let highestSimilarity = 0;
+
+                    // 遍历所有已配置的别名，找到相似度最高的
+                    for (const alias of this.allConfiguredAliases) {
+                        const similarity = this.calculateSimilarity(modelName, alias.toLowerCase());
+                        if (similarity > highestSimilarity && similarity > 0.3) { // 只有相似度超过30%才考虑
+                            highestSimilarity = similarity;
+                            bestMatch = alias;
+                        }
+                    }
+
+                    // 如果找到了相似度较高的别名，自动设置
+                    if (bestMatch && highestSimilarity > 0.3) {
+                        mapping.alias = bestMatch;
+                        console.log(`为模型 "${mapping.original}" 自动选择了相似别名 "${bestMatch}"，相似度: ${(highestSimilarity * 100).toFixed(1)}%`);
+                    }
+                },
+
+                // 计算两个字符串的相似度（基于分段匹配）
+                calculateSimilarity(str1, str2) {
+                    // 如果完全相同，返回1
+                    if (str1 === str2) return 1;
+
+                    // 按 - 分割成段
+                    const parts1 = str1.split('-').filter(part => part.length > 0);
+                    const parts2 = str2.split('-').filter(part => part.length > 0);
+
+                    if (parts1.length === 0 || parts2.length === 0) {
+                        return 0;
+                    }
+
+                    // 计算匹配的段数
+                    let matchedParts = 0;
+                    let totalWeight = 0;
+
+                    // 为每个段分配权重（前面的段权重更高）
+                    for (let i = 0; i < parts1.length; i++) {
+                        const part1 = parts1[i];
+                        const weight = Math.max(1, parts1.length - i); // 前面的段权重更高
+                        totalWeight += weight;
+
+                        // 检查是否在第二个字符串的段中找到匹配
+                        let bestMatch = 0;
+                        for (let j = 0; j < parts2.length; j++) {
+                            const part2 = parts2[j];
+                            
+                            // 完全匹配
+                            if (part1 === part2) {
+                                bestMatch = 1;
+                                break;
+                            }
+                            
+                            // 包含关系（较长包含较短的）
+                            if (part1.includes(part2) || part2.includes(part1)) {
+                                const longer = part1.length > part2.length ? part1 : part2;
+                                const shorter = part1.length <= part2.length ? part1 : part2;
+                                bestMatch = Math.max(bestMatch, shorter.length / longer.length * 0.8);
+                            }
+                            
+                            // 如果都是数字版本号，进行版本比较
+                            if (this.isVersionNumber(part1) && this.isVersionNumber(part2)) {
+                                bestMatch = Math.max(bestMatch, 0.3); // 版本号有一定相似度但不高
+                            }
+                        }
+
+                        matchedParts += bestMatch * weight;
+                    }
+
+                    // 计算相似度
+                    const similarity = totalWeight > 0 ? matchedParts / totalWeight : 0;
+
+                    // 如果第一个段（通常是主要模型名）不匹配，大幅降低相似度
+                    if (parts1.length > 0 && parts2.length > 0) {
+                        const firstPartMatch = parts1[0] === parts2[0] || 
+                                             parts1[0].includes(parts2[0]) || 
+                                             parts2[0].includes(parts1[0]);
+                        if (!firstPartMatch) {
+                            return similarity * 0.3; // 大幅降低相似度
+                        }
+                    }
+
+                    return similarity;
+                },
+
+                // 判断字符串是否是版本号
+                isVersionNumber(str) {
+                    // 匹配版本号格式：数字、点、日期等
+                    return /^[\d\.]+$/.test(str) || /^\d{4}-\d{2}-\d{2}$/.test(str) || /^v?\d+(\.\d+)*/.test(str);
+                },
+
                 // 检查是否是重复的别名
                 isDuplicateAlias(alias, currentIndex) {
                     if (!alias || !alias.trim()) {
@@ -6420,10 +6623,6 @@
                     return new Date(dateStr).toLocaleString("zh-CN");
                 },
 
-                formatPercentage(value) {
-                    if (value === null || value === undefined) return "0%";
-                    return parseFloat(value).toFixed(2) + "%";
-                },
 
                 // 启动系统健康状态的定时刷新（只刷新第一排系统信息）
                 startSystemHealthRefresh() {
