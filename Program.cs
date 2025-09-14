@@ -124,6 +124,7 @@ builder.Services.AddScoped<IMultiProviderService, MultiProviderService>();
 
 // 注册后台服务
 builder.Services.AddHostedService<OrchestrationApi.Services.Background.KeyHealthCheckService>();
+builder.Services.AddHostedService<OrchestrationApi.Services.Background.LogCleanupService>();
 
 // 添加认证
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)

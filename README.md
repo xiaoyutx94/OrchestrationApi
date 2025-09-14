@@ -323,7 +323,7 @@ curl -X POST http://localhost:5000/v1/chat/completions \
 ### Anthropic Claude 原生 API
 
 ```bash
-curl -X POST http://localhost:5000/anthropic/v1/messages \
+curl -X POST http://localhost:5000/v1/messages \
   -H "Authorization: Bearer your-proxy-key" \
   -H "Content-Type: application/json" \
   -d '{
@@ -375,7 +375,7 @@ curl -X GET http://localhost:5000/v1/models \
   -H "Authorization: Bearer your-proxy-key"
 
 # Anthropic 格式
-curl -X GET http://localhost:5000/anthropic/v1/models \
+curl -X GET http://localhost:5000/v1/models \
   -H "Authorization: Bearer your-proxy-key"
 
 # Gemini 格式

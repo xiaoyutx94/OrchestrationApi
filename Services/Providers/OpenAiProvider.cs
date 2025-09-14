@@ -426,20 +426,11 @@ public class OpenAiProvider : ILLMProvider
             }
         }
 
-        // 如果所有密钥都失败，返回默认模型列表
-        _logger.LogWarning("所有API密钥都无法获取模型列表，返回默认模型");
-        return new ModelsResponse
-        {
-            Data = new List<ModelInfo>
-            {
-                new() { Id = "gpt-4o", OwnedBy = "openai", Created = DateTimeOffset.Now.ToUnixTimeSeconds() },
-                new() { Id = "gpt-4o-mini", OwnedBy = "openai", Created = DateTimeOffset.Now.ToUnixTimeSeconds() },
-                new() { Id = "gpt-4-turbo", OwnedBy = "openai", Created = DateTimeOffset.Now.ToUnixTimeSeconds() },
-                new() { Id = "gpt-4", OwnedBy = "openai", Created = DateTimeOffset.Now.ToUnixTimeSeconds() },
-                new() { Id = "gpt-3.5-turbo", OwnedBy = "openai", Created = DateTimeOffset.Now.ToUnixTimeSeconds() }
-            }
-        };
-    }
+        // 所有密钥尝试均失败时，不再返回默认模型，抛出异常让上层处理并提示失败
+        var reason = lastException?.Message ?? "获取 OpenAI 模型列表失败";
+        _logger.LogWarning("所有API密钥都无法获取模型列表，将返回错误而非默认模型: {Reason}", reason);
+        throw lastException ?? new Exception("获取 OpenAI 模型列表失败");
+        }
 
     public async Task<bool> ValidateApiKeyAsync(
         string apiKey,

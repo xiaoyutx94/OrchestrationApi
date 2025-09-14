@@ -365,20 +365,12 @@ public class GeminiProvider : ILLMProvider
             }
         }
 
-        // 如果所有密钥都失败，返回默认模型列表
-        _logger.LogWarning("所有API密钥都无法获取模型列表，返回默认模型, 分组: {GroupId}({GroupName})", 
-            config.GroupId ?? "未知", config.GroupName ?? "未知");
-        return new ModelsResponse
-        {
-            Data = new List<ModelInfo>
-            {
-                new() { Id = "gemini-pro", OwnedBy = "google", Created = DateTimeOffset.Now.ToUnixTimeSeconds() },
-                new() { Id = "gemini-pro-vision", OwnedBy = "google", Created = DateTimeOffset.Now.ToUnixTimeSeconds() },
-                new() { Id = "gemini-1.5-pro", OwnedBy = "google", Created = DateTimeOffset.Now.ToUnixTimeSeconds() },
-                new() { Id = "gemini-1.5-flash", OwnedBy = "google", Created = DateTimeOffset.Now.ToUnixTimeSeconds() }
-            }
-        };
-    }
+        // 所有密钥尝试均失败时，不再返回默认模型，抛出异常让上层处理并提示失败
+        var reason = lastException?.Message ?? "获取 Gemini 模型列表失败";
+        _logger.LogWarning("所有API密钥都无法获取模型列表，将返回错误而非默认模型, 分组: {GroupId}({GroupName}), 原因: {Reason}", 
+            config.GroupId ?? "未知", config.GroupName ?? "未知", reason);
+        throw lastException ?? new Exception("获取 Gemini 模型列表失败");
+        }
 
     /// <summary>
     /// 获取 Gemini 原生模型列表（带分页支持）

@@ -1237,9 +1237,16 @@ public class AdminController : ControllerBase
             };
             return Ok(response);
         }
+        catch (InvalidOperationException ex)
+        {
+            // 上游API调用失败，返回明确的错误信息
+            _logger.LogWarning(ex, "获取 {ProviderType} 的模型列表失败", request.ProviderType);
+            return BadRequest(new { error = $"获取模型列表失败: {ex.Message}" });
+        }
         catch (Exception ex)
         {
-            return BadRequest(new { error = ex.Message });
+            _logger.LogError(ex, "获取可用模型时发生异常");
+            return BadRequest(new { error = $"系统异常: {ex.Message}" });
         }
     }
 
@@ -1281,32 +1288,41 @@ public class AdminController : ControllerBase
             }
 
             // 获取可用模型
-            var models = await _keyManager.GetAvailableModelsByTypeAsync(
-                group.ProviderType,
-                group.BaseUrl,
-                apiKeys,
-                group.Timeout,
-                group.RetryCount,
-                new Dictionary<string, string>()); // 空headers
-
-            // 标准化模型格式
-            var standardizedModels = new { @object = "list", data = models };
-
-            var response = new
+            try
             {
-                @object = "list",
-                data = new Dictionary<string, object>
-                {
-                    [groupId] = new
-                    {
-                        group_name = group.GroupName,
-                        provider_type = group.ProviderType,
-                        models = standardizedModels
-                    }
-                }
-            };
+                var models = await _keyManager.GetAvailableModelsByTypeAsync(
+                    group.ProviderType,
+                    group.BaseUrl,
+                    apiKeys,
+                    group.Timeout,
+                    group.RetryCount,
+                    new Dictionary<string, string>()); // 空headers
 
-            return Ok(response);
+                // 标准化模型格式
+                var standardizedModels = new { @object = "list", data = models };
+
+                var response = new
+                {
+                    @object = "list",
+                    data = new Dictionary<string, object>
+                    {
+                        [groupId] = new
+                        {
+                            group_name = group.GroupName,
+                            provider_type = group.ProviderType,
+                            models = standardizedModels
+                        }
+                    }
+                };
+
+                return Ok(response);
+            }
+            catch (InvalidOperationException ex)
+            {
+                // 上游API调用失败，返回明确的错误信息
+                _logger.LogWarning(ex, "获取分组 {GroupId} 的模型列表失败", groupId);
+                return BadRequest(new { error = $"获取模型列表失败: {ex.Message}" });
+            }
         }
         catch (Exception ex)
         {
@@ -1473,53 +1489,6 @@ public class AdminController : ControllerBase
                                 if (!string.IsNullOrWhiteSpace(aliasKey))
                                 {
                                     allModelNames.Add(aliasKey.Trim());
-                                }
-                            }
-                        }
-                    }
-                    catch
-                    {
-                        // 忽略解析失败的情况
-                    }
-                }
-
-                // 然后获取配置的实际模型名称
-                // if (!string.IsNullOrEmpty(group.Models))
-                // {
-                //     try
-                //     {
-                //         var modelList = JsonConvert.DeserializeObject<List<string>>(group.Models) ?? new List<string>();
-                //         foreach (var model in modelList)
-                //         {
-                //             if (!string.IsNullOrWhiteSpace(model))
-                //             {
-                //                 allModelNames.Add(model.Trim());
-                //             }
-                //         }
-                //     }
-                //     catch
-                //     {
-                //         // 如果解析失败，尝试作为单个字符串处理
-                //         if (!string.IsNullOrWhiteSpace(group.Models))
-                //         {
-                //             allModelNames.Add(group.Models.Trim());
-                //         }
-                //     }
-                // }
-
-                // 也包含别名映射中的原始模型名称（value部分）
-                if (!string.IsNullOrEmpty(group.ModelAliases))
-                {
-                    try
-                    {
-                        var aliases = JsonConvert.DeserializeObject<Dictionary<string, string>>(group.ModelAliases);
-                        if (aliases != null)
-                        {
-                            foreach (var originalModel in aliases.Values)
-                            {
-                                if (!string.IsNullOrWhiteSpace(originalModel))
-                                {
-                                    allModelNames.Add(originalModel.Trim());
                                 }
                             }
                         }

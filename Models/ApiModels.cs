@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using Newtonsoft.Json.Converters;
 
 namespace OrchestrationApi.Models;
@@ -1204,6 +1205,7 @@ public class AnthropicMessage
     public string Role { get; set; } = string.Empty;
 
     [JsonProperty("content")]
+    [JsonConverter(typeof(AnthropicContentListConverter))]
     public List<AnthropicContent> Content { get; set; } = new();
 }
 
@@ -1225,7 +1227,7 @@ public class AnthropicMessageRequest
     public List<AnthropicMessage> Messages { get; set; } = new();
 
     [JsonProperty("system")]
-    public string? System { get; set; }
+    public JToken? System { get; set; }
 
     [JsonProperty("temperature")]
     public float? Temperature { get; set; }
@@ -1392,3 +1394,62 @@ public class AnthropicStreamEvent
 }
 
 #endregion Anthropic Claude API Models
+
+/// <summary>
+/// Newtonsoft.Json 转换器：支持 Anthropic 消息 content 接受字符串或数组
+/// - 字符串 => [ { type: "text", text: "..." } ]
+/// - 对象   => [ { ... } ]
+/// - 数组   => 原样反序列化为 List<AnthropicContent>
+/// </summary>
+public sealed class AnthropicContentListConverter : JsonConverter<List<AnthropicContent>>
+{
+    public override List<AnthropicContent>? ReadJson(JsonReader reader, Type objectType, List<AnthropicContent>? existingValue, bool hasExistingValue, JsonSerializer serializer)
+    {
+        var token = JToken.Load(reader);
+
+        // null/undefined -> empty list
+        if (token.Type == JTokenType.Null || token.Type == JTokenType.Undefined)
+        {
+            return new List<AnthropicContent>();
+        }
+
+        // string -> single text block
+        if (token.Type == JTokenType.String)
+        {
+            return new List<AnthropicContent>
+            {
+                new AnthropicContent { Type = "text", Text = token.ToString() }
+            };
+        }
+
+        // allow basic primitives to be coerced to text
+        if (token.Type is JTokenType.Integer or JTokenType.Float or JTokenType.Boolean)
+        {
+            return new List<AnthropicContent>
+            {
+                new AnthropicContent { Type = "text", Text = token.ToString() }
+            };
+        }
+
+        // object -> single content block
+        if (token.Type == JTokenType.Object)
+        {
+            var single = token.ToObject<AnthropicContent>(serializer) ?? new AnthropicContent();
+            return new List<AnthropicContent> { single };
+        }
+
+        // array -> list of content blocks
+        if (token.Type == JTokenType.Array)
+        {
+            return token.ToObject<List<AnthropicContent>>(serializer) ?? new List<AnthropicContent>();
+        }
+
+        throw new JsonSerializationException($"Unsupported content token type: {token.Type}");
+    }
+
+    public override void WriteJson(JsonWriter writer, List<AnthropicContent>? value, JsonSerializer serializer)
+    {
+        // Always serialize as an array of content blocks
+        serializer.Serialize(writer, value ?? new List<AnthropicContent>());
+    }
+}

@@ -412,3 +412,4 @@ appsettings.Development.json
 CLAUDE.md
 .claude/
 .playwright-mcp/
+AGENTS.md

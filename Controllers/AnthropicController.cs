@@ -11,7 +11,7 @@ namespace OrchestrationApi.Controllers;
 /// Anthropic 原生 API 控制器（支持原生格式，不转换为OpenAI格式）
 /// </summary>
 [ApiController]
-[Route("anthropic/v1")]
+[Route("v1")]
 [Produces("application/json")]
 public class AnthropicController : ControllerBase
 {
@@ -45,12 +45,12 @@ public class AnthropicController : ControllerBase
             {
                 rawJsonBody = await reader.ReadToEndAsync();
             }
-            
+
             // 手动反序列化请求对象
             AnthropicMessageRequest request;
             try
             {
-                request = JsonConvert.DeserializeObject<AnthropicMessageRequest>(rawJsonBody) 
+                request = JsonConvert.DeserializeObject<AnthropicMessageRequest>(rawJsonBody)
                     ?? throw new ArgumentException("Invalid JSON format");
             }
             catch (JsonException ex)
@@ -66,7 +66,8 @@ public class AnthropicController : ControllerBase
             }
 
             var httpRequest = HttpContext.Request;
-            var proxyKey = httpRequest.Headers.Authorization.FirstOrDefault()?.Replace("Bearer ", "");
+            // 从请求头获取 x-api-key 用作 ProxyKey 判断
+            var proxyKey = httpRequest.Headers["x-api-key"].FirstOrDefault();
             if (string.IsNullOrEmpty(proxyKey))
             {
                 return BadRequest(new
@@ -168,7 +169,8 @@ public class AnthropicController : ControllerBase
     {
         try
         {
-            var proxyKey = HttpContext.Request.Headers["Authorization"].FirstOrDefault()?.Replace("Bearer ", "");
+            // 与 /v1/messages 一致，从 x-api-key 读取代理密钥
+            var proxyKey = HttpContext.Request.Headers["x-api-key"].FirstOrDefault();
             if (string.IsNullOrEmpty(proxyKey))
             {
                 return BadRequest(new

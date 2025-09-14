@@ -339,13 +339,32 @@ public class KeyManager : IKeyManager
     {
         try
         {
+            if (string.IsNullOrEmpty(groupId) || string.IsNullOrEmpty(apiKey))
+            {
+                _logger.LogWarning("IsKeyAvailableAsync: 无效的参数 - GroupId: {GroupId}, ApiKey: {ApiKey}",
+                    groupId, string.IsNullOrEmpty(apiKey) ? "null/empty" : "provided");
+                return false;
+            }
+
             var keyHash = ComputeKeyHash(apiKey);
             var validation = await GetKeyValidationAsync(groupId, keyHash);
 
             if (validation == null)
             {
-                // 首次使用，默认认为可用
+                // 首次使用，默认认为可用，但记录日志以便追踪
+                _logger.LogDebug("密钥未验证，默认认为可用 - GroupId: {GroupId}, KeyHash: {KeyHash}",
+                    groupId, keyHash.Substring(0, 8));
                 return true;
+            }
+
+            // 检查验证记录的时效性（超过24小时的记录可能过时）
+            var validationAge = DateTime.Now - validation.LastValidatedAt;
+            if (validationAge > TimeSpan.FromHours(24))
+            {
+                _logger.LogDebug("密钥验证记录过时 - GroupId: {GroupId}, Age: {Age}小时",
+                    groupId, validationAge.TotalHours);
+                // 过时的记录，谨慎处理，倾向于认为可用但需要重新验证
+                return validation.IsValid || validation.ErrorCount < 3;
             }
 
             // 如果错误次数超过阈值（例如5次），则认为不可用
@@ -353,15 +372,28 @@ public class KeyManager : IKeyManager
             {
                 // 检查是否应该重新尝试（例如1小时后）
                 var shouldRetry = DateTime.Now - validation.LastValidatedAt > TimeSpan.FromHours(1);
+                if (shouldRetry)
+                {
+                    _logger.LogDebug("密钥错误次数过多但允许重试 - GroupId: {GroupId}, ErrorCount: {ErrorCount}",
+                        groupId, validation.ErrorCount);
+                }
                 return shouldRetry;
+            }
+
+            // 如果最近有401错误，更谨慎地判断
+            if (validation.LastStatusCode == 401 && validationAge < TimeSpan.FromMinutes(30))
+            {
+                _logger.LogDebug("密钥最近有401错误 - GroupId: {GroupId}", groupId);
+                return false;
             }
 
             return validation.IsValid;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "检查密钥可用性时发生异常");
-            return true; // 默认认为可用
+            _logger.LogError(ex, "检查密钥可用性时发生异常 - GroupId: {GroupId}", groupId);
+            // 发生异常时，为了系统稳定性，默认认为可用
+            return true;
         }
     }
 
@@ -709,23 +741,77 @@ public class KeyManager : IKeyManager
                 var parameterOverrides = JsonConvert.DeserializeObject<Dictionary<string, object>>(group.ParameterOverrides) ?? new Dictionary<string, object>();
                 var headers = JsonConvert.DeserializeObject<Dictionary<string, string>>(group.Headers) ?? new Dictionary<string, string>();
 
-                // 计算健康状态：至少有一个可用的API密钥且分组已启用
+                // 改进的密钥状态检查逻辑
                 var availableKeysCount = 0;
                 var hasAvailableKey = false;
+                var validatedKeysCount = 0; // 已验证的密钥数量
+
                 if (group.Enabled && apiKeys.Any())
                 {
                     foreach (var apiKey in apiKeys)
                     {
-                        if (await IsKeyAvailableAsync(group.Id, apiKey))
+                        var keyHash = ComputeKeyHash(apiKey);
+                        var validation = await GetKeyValidationAsync(group.Id, keyHash);
+
+                        if (validation != null)
                         {
+                            validatedKeysCount++;
+                            // 使用验证记录判断可用性
+                            if (validation.IsValid && validation.ErrorCount < 5)
+                            {
+                                availableKeysCount++;
+                                hasAvailableKey = true;
+                            }
+                            else if (validation.ErrorCount >= 5)
+                            {
+                                // 检查是否应该重新尝试（1小时后）
+                                var shouldRetry = DateTime.Now - validation.LastValidatedAt > TimeSpan.FromHours(1);
+                                if (shouldRetry)
+                                {
+                                    availableKeysCount++;
+                                    hasAvailableKey = true;
+                                }
+                            }
+                        }
+                        else
+                        {
+                            // 未验证的密钥，为避免显示0，暂时认为可用，但标记需要验证
+                            // 这样可以避免首次加载时显示"0 0"的问题
                             availableKeysCount++;
                             hasAvailableKey = true;
-                            // 为了性能，找到第一个可用密钥后就可以确定健康状态了
-                            // 但我们仍然继续计数以提供准确的available_keys数据
                         }
                     }
                 }
+
+                // 如果所有密钥都未验证，提供合理的默认值
+                if (apiKeys.Any() && validatedKeysCount == 0)
+                {
+                    // 所有密钥都未验证，显示总数但标记为需要验证
+                    availableKeysCount = apiKeys.Count;
+                    hasAvailableKey = group.Enabled;
+                }
+
                 var isHealthy = group.Enabled && hasAvailableKey;
+
+                // 数据验证和一致性检查
+                var totalKeys = Math.Max(0, apiKeys.Count);
+                var availableKeys = Math.Max(0, Math.Min(availableKeysCount, totalKeys)); // 确保可用密钥数不超过总数
+
+                // 记录数据验证信息
+                if (availableKeys != availableKeysCount)
+                {
+                    _logger.LogWarning("分组 {GroupId} 密钥数据不一致，已修正 - 原始可用数: {Original}, 修正后: {Corrected}, 总数: {Total}",
+                        group.Id, availableKeysCount, availableKeys, totalKeys);
+                }
+
+                // 如果分组禁用但显示有可用密钥，修正数据
+                if (!group.Enabled && availableKeys > 0)
+                {
+                    _logger.LogDebug("分组 {GroupId} 已禁用，将可用密钥数重置为0", group.Id);
+                    availableKeys = 0;
+                    hasAvailableKey = false;
+                    isHealthy = false;
+                }
 
                 groupsDict[group.Id.ToString()] = new
                 {
@@ -746,8 +832,10 @@ public class KeyManager : IKeyManager
                     priority = group.Priority,
                     enabled = group.Enabled,
                     healthy = isHealthy,
-                    total_keys = apiKeys.Count,
-                    available_keys = availableKeysCount,
+                    total_keys = totalKeys,
+                    available_keys = availableKeys,
+                    validation_status = validatedKeysCount > 0 ? "verified" : "unverified", // 添加验证状态标识
+                    verified_keys_count = validatedKeysCount, // 已验证的密钥数量
                     created_at = group.CreatedAt,
                     updated_at = group.UpdatedAt
                 };
@@ -1465,16 +1553,17 @@ public class KeyManager : IKeyManager
             }
             else
             {
-                _logger.LogWarning("从 {ProviderType} 获取的模型列表为空，返回默认模型", providerType);
-                return GetDefaultModels(providerType);
+                _logger.LogWarning("从 {ProviderType} 获取的模型列表为空", providerType);
+                // 不返回默认模型，直接返回空列表
+                return new List<object>();
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "获取 {ProviderType} 可用模型时发生异常", providerType);
 
-            // 发生异常时返回默认模型列表
-            return GetDefaultModels(providerType);
+            // 发生异常时也不返回默认模型列表，抛出异常让上层处理
+            throw new InvalidOperationException($"无法从 {providerType} 获取模型列表: {ex.Message}", ex);
         }
     }
 
@@ -1879,6 +1968,17 @@ public class KeyManager : IKeyManager
     {
         try
         {
+            // 获取分组信息
+            var group = await _db.Queryable<GroupConfig>()
+                .Where(g => g.Id == groupId)
+                .FirstAsync();
+
+            if (group == null)
+            {
+                return new { success = false, error = "分组不存在" };
+            }
+
+            // 获取验证记录
             var validations = await _db.Queryable<KeyValidation>()
                 .Where(kv => kv.GroupId == groupId)
                 .ToListAsync();
@@ -1898,10 +1998,49 @@ public class KeyManager : IKeyManager
                 };
             }
 
+            // 计算密钥统计信息
+            var apiKeys = JsonConvert.DeserializeObject<List<string>>(group.ApiKeys) ?? new List<string>();
+            var totalKeys = apiKeys.Count;
+            var validKeys = 0;
+            var invalidKeys = 0;
+            var unknownKeys = 0; // 新增：未检测的密钥数量
+
+            // 统计有效、无效和未检测密钥数量
+            foreach (var apiKey in apiKeys)
+            {
+                var keyHash = ComputeKeyHash(apiKey);
+                var validation = validations.FirstOrDefault(v => v.ApiKeyHash == keyHash);
+
+                if (validation != null)
+                {
+                    // 有验证记录的密钥
+                    if (validation.IsValid && validation.ErrorCount < 5)
+                    {
+                        validKeys++;
+                    }
+                    else
+                    {
+                        invalidKeys++;
+                    }
+                }
+                else
+                {
+                    // 没有验证记录的密钥，标记为未检测
+                    unknownKeys++;
+                }
+            }
+
             return new
             {
                 success = true,
-                validation_status = validationStatus
+                validation_status = validationStatus,
+                // 添加密钥统计信息，包含未检测状态
+                total_keys = totalKeys,
+                valid_keys = validKeys,
+                invalid_keys = invalidKeys,
+                unknown_keys = unknownKeys, // 新增：未检测的密钥数量
+                last_validated = validations.Any() ? 
+                    validations.Max(v => v.LastValidatedAt) : (DateTime?)null
             };
         }
         catch (Exception ex)
@@ -2030,7 +2169,7 @@ public class KeyManager : IKeyManager
         try
         {
             _logger.LogInformation("开始刷新所有分组的健康状态");
-            
+
             var groups = await _db.Queryable<GroupConfig>().ToListAsync();
             var refreshResults = new List<object>();
 
@@ -2066,7 +2205,7 @@ public class KeyManager : IKeyManager
                             CreatedAt = DateTime.Now
                         };
                         await _db.Insertable(validation).ExecuteCommandAsync();
-                        _logger.LogDebug("为分组 {GroupName} 创建了新的密钥验证记录 - 状态: {IsValid}", 
+                        _logger.LogDebug("为分组 {GroupName} 创建了新的密钥验证记录 - 状态: {IsValid}",
                             group.GroupName, validationResult.IsValid);
                     }
                     else
@@ -2080,7 +2219,7 @@ public class KeyManager : IKeyManager
 
                         if (validationResult.IsValid && !oldStatus)
                         {
-                            _logger.LogInformation("密钥状态恢复正常 - 分组: {GroupName}, 状态: {OldStatus} -> {NewStatus}", 
+                            _logger.LogInformation("密钥状态恢复正常 - 分组: {GroupName}, 状态: {OldStatus} -> {NewStatus}",
                                 group.GroupName, oldStatus, validationResult.IsValid);
                         }
 
@@ -2105,7 +2244,7 @@ public class KeyManager : IKeyManager
             }
 
             var totalKeysChecked = refreshResults.Sum(r => ((dynamic)r).total_keys);
-            _logger.LogInformation("健康状态刷新完成 - 检查了 {GroupCount} 个分组，总共 {TotalKeys} 个密钥", 
+            _logger.LogInformation("健康状态刷新完成 - 检查了 {GroupCount} 个分组，总共 {TotalKeys} 个密钥",
                 refreshResults.Count, totalKeysChecked);
 
             return new
@@ -2122,7 +2261,6 @@ public class KeyManager : IKeyManager
             throw;
         }
     }
-
 
     /// <summary>
     /// 根据策略选择密钥（异步版本）
@@ -2311,6 +2449,11 @@ public class KeyManager : IKeyManager
                 var keyHash = ComputeKeyHash(apiKey);
                 var stats = await GetKeyUsageStatsAsync(groupId, keyHash);
                 var isAvailable = await IsKeyAvailableAsync(groupId, apiKey);
+                
+                // 获取密钥验证状态信息，包括最后检查的状态码
+                var validation = await _db.Queryable<KeyValidation>()
+                    .Where(kv => kv.GroupId == groupId && kv.ApiKeyHash == keyHash)
+                    .FirstAsync();
 
                 keyStats.Add(new
                 {
@@ -2319,6 +2462,8 @@ public class KeyManager : IKeyManager
                     usage_count = stats?.UsageCount ?? 0,
                     last_used = stats?.LastUsedAt,
                     is_available = isAvailable,
+                    last_status_code = validation?.LastStatusCode,
+                    last_validated_at = validation?.LastValidatedAt,
                     created_at = stats?.CreatedAt,
                     updated_at = stats?.UpdatedAt
                 });
