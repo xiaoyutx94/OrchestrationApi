@@ -65,7 +65,7 @@
 1. **准备部署文件**
 ```bash
 # 克隆或下载项目
-git clone <repository-url>
+git clone https://github.com/xiaoyutx94/OrchestrationApi
 cd OrchestrationApi
 
 # 创建数据目录
