@@ -363,11 +363,9 @@ public class AnthropicProvider : ILLMProvider
         {
             Data = new List<ModelInfo>
             {
-                new() { Id = "claude-3-5-sonnet-20241022", OwnedBy = "anthropic", Created = DateTimeOffset.Now.ToUnixTimeSeconds() },
                 new() { Id = "claude-3-5-haiku-20241022", OwnedBy = "anthropic", Created = DateTimeOffset.Now.ToUnixTimeSeconds() },
-                new() { Id = "claude-3-opus-20240229", OwnedBy = "anthropic", Created = DateTimeOffset.Now.ToUnixTimeSeconds() },
-                new() { Id = "claude-3-sonnet-20240229", OwnedBy = "anthropic", Created = DateTimeOffset.Now.ToUnixTimeSeconds() },
-                new() { Id = "claude-3-haiku-20240307", OwnedBy = "anthropic", Created = DateTimeOffset.Now.ToUnixTimeSeconds() }
+                new() { Id = "claude-opus-4-20250514", OwnedBy = "anthropic", Created = DateTimeOffset.Now.ToUnixTimeSeconds() },
+                new() { Id = "claude-sonnet-4-20250514", OwnedBy = "anthropic", Created = DateTimeOffset.Now.ToUnixTimeSeconds() }
             }
         };
     }

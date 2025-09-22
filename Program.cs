@@ -30,7 +30,8 @@ builder.Services.AddMemoryCache();
 
 // 添加健康检查
 builder.Services.AddHealthChecks()
-    .AddCheck<DatabaseHealthCheck>("database");
+    .AddCheck<DatabaseHealthCheck>("database")
+    .AddCheck<OrchestrationApi.Services.Core.LogQueueHealthCheck>("log_queue");
 
 // 配置Swagger
 builder.Services.AddEndpointsApiExplorer();
@@ -122,9 +123,15 @@ builder.Services.AddScoped<GeminiProvider>(provider =>
 
 builder.Services.AddScoped<IMultiProviderService, MultiProviderService>();
 
+// 注册健康检查服务
+builder.Services.AddScoped<IHealthCheckService, OrchestrationApi.Services.Core.HealthCheckService>();
+
 // 注册后台服务
 builder.Services.AddHostedService<OrchestrationApi.Services.Background.KeyHealthCheckService>();
 builder.Services.AddHostedService<OrchestrationApi.Services.Background.LogCleanupService>();
+builder.Services.AddHostedService<OrchestrationApi.Services.Background.HealthCheckBackgroundService>();
+builder.Services.AddSingleton<OrchestrationApi.Services.Background.AsyncLogProcessingService>();
+builder.Services.AddHostedService(provider => provider.GetRequiredService<OrchestrationApi.Services.Background.AsyncLogProcessingService>());
 
 // 添加认证
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -218,6 +225,12 @@ app.MapGet("/dashboard", async context =>
 app.MapGet("/logs", async context =>
 {
     await context.Response.SendFileAsync("wwwroot/logs.html");
+});
+
+// 健康检查报表路由
+app.MapGet("/health-report", async context =>
+{
+    await context.Response.SendFileAsync("wwwroot/health-report.html");
 });
 
 // 登录页面路由

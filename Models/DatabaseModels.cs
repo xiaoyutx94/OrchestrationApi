@@ -78,6 +78,14 @@ public class GroupConfig
 
     [SugarColumn(ColumnName = "proxy_config", ColumnDataType = "TEXT")]
     public string ProxyConfig { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 假流模式：将非流式响应伪装成流式响应输出给客户端
+    /// 主要用于不支持流式输出的上游API
+    /// </summary>
+    [SugarColumn(ColumnName = "fake_streaming")]
+    [DefaultValue(false)]
+    public bool FakeStreaming { get; set; } = false;
 }
 
 /// <summary>
@@ -340,4 +348,98 @@ public class UserSession
 
     [SugarColumn(ColumnName = "user_agent", Length = 500)]
     public string? UserAgent { get; set; }
+}
+
+/// <summary>
+/// 健康检查结果表
+/// </summary>
+[SugarTable("orch_health_check_results")]
+public class HealthCheckResult
+{
+    [SugarColumn(ColumnName = "id", IsPrimaryKey = true, IsIdentity = true)]
+    public int Id { get; set; }
+
+    [SugarColumn(ColumnName = "group_id", Length = 100)]
+    [Required]
+    public string GroupId { get; set; } = string.Empty;
+
+    [SugarColumn(ColumnName = "api_key_hash", Length = 64, IsNullable = true)]
+    public string? ApiKeyHash { get; set; }
+
+    [SugarColumn(ColumnName = "api_key_masked", Length = 100, IsNullable = true)]
+    public string? ApiKeyMasked { get; set; }
+
+    [SugarColumn(ColumnName = "model_id", Length = 200, IsNullable = true)]
+    public string? ModelId { get; set; }
+
+    [SugarColumn(ColumnName = "check_type", Length = 50)]
+    [Required]
+    public string CheckType { get; set; } = string.Empty; // provider, key, model
+
+    [SugarColumn(ColumnName = "status_code")]
+    public int StatusCode { get; set; }
+
+    [SugarColumn(ColumnName = "response_time_ms")]
+    public int ResponseTimeMs { get; set; }
+
+    [SugarColumn(ColumnName = "is_success")]
+    public bool IsSuccess { get; set; }
+
+    [SugarColumn(ColumnName = "error_message", ColumnDataType = "TEXT", IsNullable = true)]
+    public string? ErrorMessage { get; set; }
+
+    [SugarColumn(ColumnName = "checked_at")]
+    public DateTime CheckedAt { get; set; } = DateTime.Now;
+
+    [SugarColumn(ColumnName = "provider_type", Length = 50)]
+    [Required]
+    public string ProviderType { get; set; } = string.Empty;
+
+    [SugarColumn(ColumnName = "base_url", Length = 500, IsNullable = true)]
+    public string? BaseUrl { get; set; }
+}
+
+/// <summary>
+/// 健康检查统计表
+/// </summary>
+[SugarTable("orch_health_check_stats")]
+public class HealthCheckStats
+{
+    [SugarColumn(ColumnName = "id", IsPrimaryKey = true, IsIdentity = true)]
+    public int Id { get; set; }
+
+    [SugarColumn(ColumnName = "group_id", Length = 100)]
+    [Required]
+    public string GroupId { get; set; } = string.Empty;
+
+    [SugarColumn(ColumnName = "check_type", Length = 50)]
+    [Required]
+    public string CheckType { get; set; } = string.Empty;
+
+    [SugarColumn(ColumnName = "total_checks")]
+    public int TotalChecks { get; set; } = 0;
+
+    [SugarColumn(ColumnName = "successful_checks")]
+    public int SuccessfulChecks { get; set; } = 0;
+
+    [SugarColumn(ColumnName = "failed_checks")]
+    public int FailedChecks { get; set; } = 0;
+
+    [SugarColumn(ColumnName = "avg_response_time_ms")]
+    public double AvgResponseTimeMs { get; set; } = 0;
+
+    [SugarColumn(ColumnName = "last_check_at", IsNullable = true)]
+    public DateTime? LastCheckAt { get; set; }
+
+    [SugarColumn(ColumnName = "last_success_at", IsNullable = true)]
+    public DateTime? LastSuccessAt { get; set; }
+
+    [SugarColumn(ColumnName = "last_failure_at", IsNullable = true)]
+    public DateTime? LastFailureAt { get; set; }
+
+    [SugarColumn(ColumnName = "consecutive_failures")]
+    public int ConsecutiveFailures { get; set; } = 0;
+
+    [SugarColumn(ColumnName = "updated_at")]
+    public DateTime UpdatedAt { get; set; } = DateTime.Now;
 }

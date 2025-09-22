@@ -413,3 +413,6 @@ CLAUDE.md
 .claude/
 .playwright-mcp/
 AGENTS.md
+Tests/
+.serena/
+.spec-workflow/

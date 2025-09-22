@@ -71,6 +71,17 @@ public class ProviderConfig
     /// 代理配置
     /// </summary>
     public ProxyConfig? ProxyConfig { get; set; }
+
+    /// <summary>
+    /// 假流模式：将非流式响应伪装成流式响应输出给客户端
+    /// 主要用于不支持流式输出的上游API
+    /// </summary>
+    public bool FakeStreaming { get; set; } = false;
+
+    /// <summary>
+    /// API端点类型，用于区分不同的API端点
+    /// </summary>
+    public string EndpointType { get; set; } = "chat/completions";
 }
 
 /// <summary>

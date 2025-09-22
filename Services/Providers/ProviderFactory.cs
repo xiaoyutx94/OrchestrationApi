@@ -35,6 +35,7 @@ public class ProviderFactory : IProviderFactory
         return providerType.ToLower() switch
         {
             "openai" => _serviceProvider.GetRequiredService<OpenAiProvider>(),
+            "openai_responses" => _serviceProvider.GetRequiredService<OpenAiProvider>(),
             "anthropic" => _serviceProvider.GetRequiredService<AnthropicProvider>(),
             "gemini" => _serviceProvider.GetRequiredService<GeminiProvider>(),
             _ => throw new NotSupportedException($"Provider '{providerType}' is not supported."),
@@ -43,6 +44,6 @@ public class ProviderFactory : IProviderFactory
 
     public IEnumerable<string> GetSupportedProviderTypes()
     {
-        return new[] { "openai", "anthropic", "gemini" };
+        return new[] { "openai", "openai_responses", "anthropic", "gemini" };
     }
 }

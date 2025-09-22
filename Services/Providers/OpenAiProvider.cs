@@ -51,10 +51,36 @@ public class OpenAiProvider : ILLMProvider
     /// <summary>
     /// 获取模型列表端点
     /// </summary>
-    /// <returns>模型列表端点</returns>
+    /// <returns>模型列
+    /// 端点</returns>
     public string GetModelsEndpoint()
     {
         return "/models";
+    }
+
+    /// <summary>
+    /// 获取Responses API端点
+    /// </summary>
+    /// <returns>Responses API端点</returns>
+    public string GetResponsesEndpoint()
+    {
+        return "/responses";
+    }
+
+    /// <summary>
+    /// 根据端点类型获取对应的端点路径
+    /// </summary>
+    /// <param name="endpointType">端点类型</param>
+    /// <returns>端点路径</returns>
+    private string GetEndpointByType(string endpointType)
+    {
+        return endpointType.ToLower() switch
+        {
+            "responses" => GetResponsesEndpoint(),
+            "chat/completions" => GetChatCompletionEndpoint(),
+            "models" => GetModelsEndpoint(),
+            _ => GetChatCompletionEndpoint() // 默认使用chat/completions
+        };
     }
 
     /// <summary>
@@ -77,12 +103,43 @@ public class OpenAiProvider : ILLMProvider
             Temperature = request.Temperature,
             TopP = request.TopP,
             MaxTokens = request.MaxTokens,
-            Stream = request.Stream,
+            Stream = config.FakeStreaming ? false : request.Stream, // 假流模式下强制非流式
             PresencePenalty = request.PresencePenalty,
             FrequencyPenalty = request.FrequencyPenalty,
             Tools = request.Tools,
             Stop = request.Stop,
-            StreamOptions = request.StreamOptions
+            StreamOptions = request.StreamOptions,
+            LogitBias = request.LogitBias,
+            User = request.User,
+
+            // 新增参数透传
+            N = request.N,
+            FunctionCall = request.FunctionCall,
+            Functions = request.Functions,
+            ToolChoice = request.ToolChoice,
+            ParallelToolCalls = request.ParallelToolCalls,
+            ResponseFormat = request.ResponseFormat,
+            Seed = request.Seed,
+            ServiceTier = request.ServiceTier,
+
+            // GPT-5/GPT-4o 新参数
+            Verbosity = request.Verbosity,
+            MinimalReasoning = request.MinimalReasoning,
+            AllowedTools = request.AllowedTools,
+            ReasoningEffort = request.ReasoningEffort,
+
+            // 扩展参数
+            Metadata = request.Metadata,
+            Store = request.Store,
+
+            // 新补充的重要参数
+            TopLogprobs = request.TopLogprobs,
+            Logprobs = request.Logprobs,
+            MaxCompletionTokens = request.MaxCompletionTokens,
+            Modalities = request.Modalities,
+            Audio = request.Audio,
+            Prediction = request.Prediction,
+            DeveloperMessage = request.DeveloperMessage
         };
 
         // 应用参数覆盖
@@ -113,6 +170,62 @@ public class OpenAiProvider : ILLMProvider
                 case "frequency_penalty":
                     if (float.TryParse(parameter.Value.ToString(), out var frequencyPenalty))
                         resolvedRequest.FrequencyPenalty = frequencyPenalty;
+                    break;
+
+                case "n":
+                    if (int.TryParse(parameter.Value.ToString(), out var n))
+                        resolvedRequest.N = n;
+                    break;
+
+                case "seed":
+                    if (int.TryParse(parameter.Value.ToString(), out var seed))
+                        resolvedRequest.Seed = seed;
+                    break;
+
+                case "verbosity":
+                    resolvedRequest.Verbosity = parameter.Value.ToString();
+                    break;
+
+                case "reasoning_effort":
+                    resolvedRequest.ReasoningEffort = parameter.Value.ToString();
+                    break;
+
+                case "service_tier":
+                    resolvedRequest.ServiceTier = parameter.Value.ToString();
+                    break;
+
+                case "minimal_reasoning":
+                    if (bool.TryParse(parameter.Value.ToString(), out var minimalReasoning))
+                        resolvedRequest.MinimalReasoning = minimalReasoning;
+                    break;
+
+                case "parallel_tool_calls":
+                    if (bool.TryParse(parameter.Value.ToString(), out var parallelToolCalls))
+                        resolvedRequest.ParallelToolCalls = parallelToolCalls;
+                    break;
+
+                case "store":
+                    if (bool.TryParse(parameter.Value.ToString(), out var store))
+                        resolvedRequest.Store = store;
+                    break;
+
+                case "top_logprobs":
+                    if (int.TryParse(parameter.Value.ToString(), out var topLogprobs))
+                        resolvedRequest.TopLogprobs = topLogprobs;
+                    break;
+
+                case "logprobs":
+                    if (bool.TryParse(parameter.Value.ToString(), out var logprobs))
+                        resolvedRequest.Logprobs = logprobs;
+                    break;
+
+                case "max_completion_tokens":
+                    if (int.TryParse(parameter.Value.ToString(), out var maxCompletionTokens))
+                        resolvedRequest.MaxCompletionTokens = maxCompletionTokens;
+                    break;
+
+                case "developer_message":
+                    resolvedRequest.DeveloperMessage = parameter.Value.ToString();
                     break;
             }
         }
@@ -200,7 +313,7 @@ public class OpenAiProvider : ILLMProvider
                 MaskApiKey(apiKey), isStreaming, config.GroupId ?? "未知", config.GroupName ?? "未知");
 
             var baseUrl = GetBaseUrl(config);
-            var endpoint = GetChatCompletionEndpoint();
+            var endpoint = GetEndpointByType(config.EndpointType);
             var fullUrl = $"{baseUrl}{endpoint}";
 
             using var request = new HttpRequestMessage(HttpMethod.Post, fullUrl);
@@ -232,9 +345,13 @@ public class OpenAiProvider : ILLMProvider
             // 开始计时
             var stopwatch = Stopwatch.StartNew();
 
+            // 判断是否需要假流：客户端要求流式 + 配置了假流模式
+            var useFakeStreaming = isStreaming && config.FakeStreaming;
+            var actualIsStreaming = useFakeStreaming ? false : isStreaming; // 假流模式下强制非流式请求上游
+
             // 发送请求
             var response = await httpClient.SendAsync(request,
-                isStreaming ? HttpCompletionOption.ResponseHeadersRead : HttpCompletionOption.ResponseContentRead,
+                actualIsStreaming ? HttpCompletionOption.ResponseHeadersRead : HttpCompletionOption.ResponseContentRead,
                 combinedCts.Token);
 
             // 停止计时
@@ -255,10 +372,25 @@ public class OpenAiProvider : ILLMProvider
 
             if (response.IsSuccessStatusCode)
             {
-                _logger.LogDebug("OpenAI HTTP请求成功，状态码: {StatusCode}, 耗时: {ElapsedMs}ms, API密钥: {ApiKey}, 流式: {IsStreaming}, 分组: {GroupId}({GroupName})",
-                    statusCode, elapsedMs, MaskApiKey(apiKey), isStreaming, config.GroupId ?? "未知", config.GroupName ?? "未知");
+                _logger.LogDebug("OpenAI HTTP请求成功，状态码: {StatusCode}, 耗时: {ElapsedMs}ms, API密钥: {ApiKey}, 流式: {IsStreaming}, 假流: {UseFakeStreaming}, 分组: {GroupId}({GroupName})",
+                    statusCode, elapsedMs, MaskApiKey(apiKey), isStreaming, useFakeStreaming, config.GroupId ?? "未知", config.GroupName ?? "未知");
 
-                var responseStream = await response.Content.ReadAsStreamAsync();
+                Stream responseStream;
+                
+                if (useFakeStreaming)
+                {
+                    // 假流模式：将非流式响应转换为流式格式
+                    var nonStreamingContent = await response.Content.ReadAsStringAsync();
+                    responseStream = ConvertToFakeStream(nonStreamingContent);
+                    
+                    _logger.LogDebug("OpenAI 假流转换完成，原始响应长度: {ContentLength}, 分组: {GroupId}({GroupName})",
+                        nonStreamingContent?.Length ?? 0, config.GroupId ?? "未知", config.GroupName ?? "未知");
+                }
+                else
+                {
+                    // 正常模式：直接返回响应流
+                    responseStream = await response.Content.ReadAsStreamAsync();
+                }
 
                 return new ProviderHttpResponse
                 {
@@ -512,5 +644,141 @@ public class OpenAiProvider : ILLMProvider
             BypassLocal = proxyConfig.BypassLocal,
             BypassDomains = proxyConfig.BypassDomains ?? new List<string>()
         };
+    }
+
+    /// <summary>
+    /// 将非流式响应转换为假流式响应
+    /// </summary>
+    /// <param name="nonStreamingContent">非流式响应内容</param>
+    /// <returns>假流式响应流</returns>
+    private Stream ConvertToFakeStream(string nonStreamingContent)
+    {
+        try
+        {
+            // 解析非流式响应
+            var response = JsonConvert.DeserializeObject<ChatCompletionResponse>(nonStreamingContent);
+            if (response == null)
+            {
+                _logger.LogWarning("OpenAI 假流转换失败：无法解析响应内容");
+                return new MemoryStream(Encoding.UTF8.GetBytes("data: [DONE]\n\n"));
+            }
+
+            var streamChunks = new List<string>();
+
+            // 遍历每个choice，将其转换为流式chunk
+            for (int choiceIndex = 0; choiceIndex < response.Choices.Count; choiceIndex++)
+            {
+                var choice = response.Choices[choiceIndex];
+                
+                // 如果有内容，分段发送
+                var contentStr = choice.Message?.Content?.ToString();
+                if (!string.IsNullOrEmpty(contentStr))
+                {
+                    const int chunkSize = 50; // 每个chunk的字符数
+                    
+                    for (int i = 0; i < contentStr.Length; i += chunkSize)
+                    {
+                        var chunkContent = contentStr.Substring(i, Math.Min(chunkSize, contentStr.Length - i));
+                        
+                        var streamChunk = new
+                        {
+                            id = response.Id,
+                            @object = "chat.completion.chunk",
+                            created = response.Created,
+                            model = response.Model,
+                            choices = new[]
+                            {
+                                new
+                                {
+                                    index = choiceIndex,
+                                    delta = new { content = chunkContent },
+                                    finish_reason = (string?)null
+                                }
+                            }
+                        };
+
+                        streamChunks.Add($"data: {JsonConvert.SerializeObject(streamChunk)}\n\n");
+                    }
+                }
+
+                // 发送工具调用chunk（如果有）
+                if (choice.Message?.ToolCalls != null && choice.Message.ToolCalls.Count > 0)
+                {
+                    foreach (var toolCall in choice.Message.ToolCalls)
+                    {
+                        var toolCallChunk = new
+                        {
+                            id = response.Id,
+                            @object = "chat.completion.chunk",
+                            created = response.Created,
+                            model = response.Model,
+                            choices = new[]
+                            {
+                                new
+                                {
+                                    index = choiceIndex,
+                                    delta = new { 
+                                        tool_calls = new[]
+                                        {
+                                            new
+                                            {
+                                                index = 0,
+                                                id = toolCall.Id,
+                                                type = toolCall.Type,
+                                                function = new
+                                                {
+                                                    name = toolCall.Function?.Name,
+                                                    arguments = toolCall.Function?.Arguments
+                                                }
+                                            }
+                                        }
+                                    },
+                                    finish_reason = (string?)null
+                                }
+                            }
+                        };
+
+                        streamChunks.Add($"data: {JsonConvert.SerializeObject(toolCallChunk)}\n\n");
+                    }
+                }
+
+                // 发送结束chunk
+                var finishChunk = new
+                {
+                    id = response.Id,
+                    @object = "chat.completion.chunk",
+                    created = response.Created,
+                    model = response.Model,
+                    choices = new[]
+                    {
+                        new
+                        {
+                            index = choiceIndex,
+                            delta = new { },
+                            finish_reason = choice.FinishReason ?? "stop"
+                        }
+                    }
+                };
+
+                streamChunks.Add($"data: {JsonConvert.SerializeObject(finishChunk)}\n\n");
+            }
+
+            // 添加结束标识
+            streamChunks.Add("data: [DONE]\n\n");
+
+            // 合并所有chunk
+            var completeStreamContent = string.Join("", streamChunks);
+            
+            _logger.LogDebug("OpenAI 假流转换完成，生成了 {ChunkCount} 个chunk，总长度: {TotalLength}", 
+                streamChunks.Count, completeStreamContent.Length);
+            
+            return new MemoryStream(Encoding.UTF8.GetBytes(completeStreamContent));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "OpenAI 假流转换异常");
+            // 返回基础的错误流
+            return new MemoryStream(Encoding.UTF8.GetBytes("data: [DONE]\n\n"));
+        }
     }
 }

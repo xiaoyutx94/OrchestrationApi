@@ -22,9 +22,11 @@ public class AuthenticationMiddleware
     {
         "/dashboard",
         "/logs",
+        "/health-report",
         "/",
         "/dashboard.html",
-        "/logs.html"
+        "/logs.html",
+        "/health-report.html"
     };
 
     // 公共路径（不需要认证）

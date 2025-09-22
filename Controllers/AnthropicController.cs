@@ -8,15 +8,14 @@ using System.Text;
 namespace OrchestrationApi.Controllers;
 
 /// <summary>
-/// Anthropic 原生 API 控制器（支持原生格式，不转换为OpenAI格式）
+/// Anthropic 原生 API 控制器
 /// </summary>
 [ApiController]
-[Route("v1")]
+[Route("claude/v1")]
 [Produces("application/json")]
 public class AnthropicController : ControllerBase
 {
     private readonly IMultiProviderService _multiProviderService;
-    private readonly IProviderFactory _providerFactory;
     private readonly ILogger<AnthropicController> _logger;
     private readonly string _providerType = "anthropic";
 
@@ -26,7 +25,6 @@ public class AnthropicController : ControllerBase
         ILogger<AnthropicController> logger)
     {
         _multiProviderService = multiProviderService;
-        _providerFactory = providerFactory;
         _logger = logger;
     }
 

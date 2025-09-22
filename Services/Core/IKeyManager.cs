@@ -878,6 +878,7 @@ public class KeyManager : IKeyManager
                 TestModel = groupRequest.TestModel ?? string.Empty,
                 Priority = groupRequest.Priority,
                 Enabled = groupRequest.Enabled,
+                FakeStreaming = groupRequest.FakeStreaming, // 添加假流配置支持
                 CreatedAt = DateTime.Now,
                 UpdatedAt = DateTime.Now
             };
@@ -921,6 +922,7 @@ public class KeyManager : IKeyManager
             existingGroup.TestModel = groupRequest.TestModel ?? string.Empty;
             existingGroup.Priority = groupRequest.Priority;
             existingGroup.Enabled = groupRequest.Enabled;
+            existingGroup.FakeStreaming = groupRequest.FakeStreaming; // 添加假流配置支持
             existingGroup.UpdatedAt = DateTime.Now;
 
             await _db.Updateable(existingGroup).ExecuteCommandAsync();

@@ -1,4 +1,5 @@
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using OrchestrationApi.Models;
 using OrchestrationApi.Services.Providers;
 
@@ -109,6 +110,50 @@ public interface IMultiProviderService
         string? userAgent = null,
         string? endpoint = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 处理Responses API请求（透明代理模式）
+    /// </summary>
+    /// <param name="request">Responses API请求</param>
+    /// <param name="proxyKey">代理密钥</param>
+    /// <param name="providerType">服务商类型</param>
+    /// <param name="clientIp">客户端IP</param>
+    /// <param name="userAgent">用户代理</param>
+    /// <param name="endpoint">请求路径</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>HTTP响应</returns>
+    Task<ProviderHttpResponse> ProcessResponsesHttpAsync(
+        ResponsesRequest request,
+        string proxyKey,
+        string providerType,
+        string? clientIp = null,
+        string? userAgent = null,
+        string? endpoint = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 检索之前的响应
+    /// </summary>
+    /// <param name="responseId">响应ID</param>
+    /// <param name="proxyKey">代理密钥</param>
+    /// <returns>响应详情</returns>
+    Task<ResponsesApiResponse?> RetrieveResponseAsync(string responseId, string proxyKey);
+
+    /// <summary>
+    /// 删除存储的响应
+    /// </summary>
+    /// <param name="responseId">响应ID</param>
+    /// <param name="proxyKey">代理密钥</param>
+    /// <returns>是否删除成功</returns>
+    Task<bool> DeleteResponseAsync(string responseId, string proxyKey);
+
+    /// <summary>
+    /// 取消后台响应任务
+    /// </summary>
+    /// <param name="responseId">响应ID</param>
+    /// <param name="proxyKey">代理密钥</param>
+    /// <returns>取消结果</returns>
+    Task<ResponsesApiResponse?> CancelResponseAsync(string responseId, string proxyKey);
 }
 
 /// <summary>
@@ -364,7 +409,8 @@ public class MultiProviderService : IMultiProviderService
                 ParameterOverrides = parameterOverrides,
                 GroupId = group.Id,
                 GroupName = group.GroupName,
-                ProxyConfig = ParseProxyConfig(group)
+                ProxyConfig = ParseProxyConfig(group),
+                FakeStreaming = group.FakeStreaming // 传递假流配置
             };
 
             _logger.LogDebug("直接调用Provider - RequestId: {RequestId}, Provider: {ProviderType}, GroupId: {GroupId}, Attempt: {Attempt}",
@@ -375,6 +421,8 @@ public class MultiProviderService : IMultiProviderService
 
             // 直接调用Provider的HTTP代理方法进行流式处理
             var httpContent = await provider.PrepareRequestContentAsync(request, providerConfig, cancellationToken);
+            // 注意：对于流式处理，如果配置了假流模式，我们仍然需要获取流式响应
+            // 因为假流模式的转换在Provider内部处理
             var httpResponse = await provider.SendHttpRequestAsync(
                 httpContent, apiKey, providerConfig, true, cancellationToken);
 
@@ -525,7 +573,8 @@ public class MultiProviderService : IMultiProviderService
                                 ParameterOverrides = string.IsNullOrEmpty(group.ParameterOverrides) ? new() : JsonConvert.DeserializeObject<Dictionary<string, object>>(group.ParameterOverrides) ?? new(),
                                 GroupId = group.Id,
                                 GroupName = group.GroupName,
-                                ProxyConfig = ParseProxyConfig(group)
+                                ProxyConfig = ParseProxyConfig(group),
+                                FakeStreaming = group.FakeStreaming // 传递假流配置
                             };
 
                             var providerModels = await provider.GetModelsAsync(config);
@@ -683,7 +732,8 @@ public class MultiProviderService : IMultiProviderService
                                 ParameterOverrides = string.IsNullOrEmpty(group.ParameterOverrides) ? new() : JsonConvert.DeserializeObject<Dictionary<string, object>>(group.ParameterOverrides) ?? new(),
                                 GroupId = group.Id,
                                 GroupName = group.GroupName,
-                                ProxyConfig = ParseProxyConfig(group)
+                                ProxyConfig = ParseProxyConfig(group),
+                                FakeStreaming = group.FakeStreaming // 传递假流配置
                             };
 
                             var providerModels = await provider.GetModelsAsync(config);
@@ -774,7 +824,8 @@ public class MultiProviderService : IMultiProviderService
             ParameterOverrides = string.IsNullOrEmpty(group.ParameterOverrides) ? new() : JsonConvert.DeserializeObject<Dictionary<string, object>>(group.ParameterOverrides) ?? new(),
             GroupId = group.Id,
             GroupName = group.GroupName,
-            ProxyConfig = ParseProxyConfig(group)
+            ProxyConfig = ParseProxyConfig(group),
+            FakeStreaming = group.FakeStreaming // 传递假流配置
         };
     }
 
@@ -1142,8 +1193,10 @@ public class MultiProviderService : IMultiProviderService
                                 requestId, routeResult.Group.ProviderType, routeResult.Group.Id, attempt + 1, currentApiKey?[..8] + "...");
 
                             // 发送HTTP请求（Provider不再包含重试逻辑）
+                            // 注意：这里不能直接传入request.Stream，因为假流模式需要发送非流式请求到上游
+                            var actualIsStreaming = providerConfig.FakeStreaming ? false : request.Stream;
                             var response = await provider.SendHttpRequestAsync(
-                                httpContent, currentApiKey!, providerConfig, request.Stream, cancellationToken);
+                                httpContent, currentApiKey!, providerConfig, actualIsStreaming, cancellationToken);
 
                             // 分析响应并决定后续策略
                             var (shouldRetry, shouldSwitchApiKey, shouldSwitchProvider) = AnalyzeProviderResponse(response, null);
@@ -1472,8 +1525,10 @@ public class MultiProviderService : IMultiProviderService
                                 requestId, routeResult.Group.ProviderType, routeResult.Group.Id, attempt + 1, currentApiKey?[..8] + "...");
 
                             // 发送HTTP请求（Provider不再包含重试逻辑）
+                            // 注意：假流模式需要发送非流式请求到上游
+                            var actualIsStreaming = providerConfig.FakeStreaming ? false : isStreamRequest;
                             var response = await provider.SendHttpRequestAsync(
-                                httpContent, currentApiKey!, providerConfig, isStreamRequest, cancellationToken);
+                                httpContent, currentApiKey!, providerConfig, actualIsStreaming, cancellationToken);
 
                             // 分析响应并决定后续策略
                             var (shouldRetry, shouldSwitchApiKey, shouldSwitchProvider) = AnalyzeProviderResponse(response, null);
@@ -1803,8 +1858,10 @@ public class MultiProviderService : IMultiProviderService
 
                     // 准备Anthropic原生请求内容
                     var httpContent = await ((AnthropicProvider)provider).PrepareAnthropicRequestContentAsync(processedRequest, providerConfig, cancellationToken);
+                    // 注意：假流模式需要发送非流式请求到上游
+                    var actualIsStreaming = providerConfig.FakeStreaming ? false : processedRequest.Stream;
                     var httpResponse = await provider.SendHttpRequestAsync(
-                        httpContent, apiKey, providerConfig, processedRequest.Stream, cancellationToken);
+                        httpContent, apiKey, providerConfig, actualIsStreaming, cancellationToken);
 
                     if (httpResponse.IsSuccess)
                     {
@@ -1813,9 +1870,17 @@ public class MultiProviderService : IMultiProviderService
                         await _keyManager.UpdateKeyUsageStatsAsync(group.Id, apiKey);
 
                         // 记录成功日志
-                        var startTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-                        var endTime = startTime + 100; // 估算
-                        await _requestLogger.LogRequestEndAsync(requestId, httpResponse.StatusCode, null, null, null);
+                        await _requestLogger.LogRequestEndAsync(requestId, httpResponse.StatusCode,
+                            null, // HTTP透明代理模式不记录响应体内容，保持透传性能
+                            httpResponse.Headers,
+                            null, // no error message
+                            null, null, null, // token信息在HTTP透明代理模式下无法准确获取
+                            group.Id,
+                            group.ProviderType,
+                            originalModelName, // 使用原始模型名称
+                            false, // Anthropic请求通常没有tools
+                            processedRequest.Stream,
+                            apiKey);
 
                         return httpResponse;
                     }
@@ -1833,7 +1898,17 @@ public class MultiProviderService : IMultiProviderService
                         }
 
                         // 不可重试的错误，直接返回
-                        await _requestLogger.LogRequestEndAsync(requestId, httpResponse.StatusCode, null, null, httpResponse.ErrorMessage);
+                        await _requestLogger.LogRequestEndAsync(requestId, httpResponse.StatusCode,
+                            null, // HTTP透明代理模式不记录响应体内容
+                            httpResponse.Headers,
+                            httpResponse.ErrorMessage,
+                            null, null, null, // token信息在HTTP透明代理模式下无法准确获取
+                            group.Id,
+                            group.ProviderType,
+                            originalModelName, // 使用原始模型名称
+                            false, // Anthropic请求通常没有tools
+                            processedRequest.Stream,
+                            apiKey);
                         return httpResponse;
                     }
                 }
@@ -1853,7 +1928,17 @@ public class MultiProviderService : IMultiProviderService
             // 所有重试都失败了
             var finalErrorMessage = $"所有Provider重试均失败。最后异常: {lastException?.Message}";
             _logger.LogError("Anthropic原生请求最终失败 - RequestId: {RequestId}, 错误: {Error}", requestId, finalErrorMessage);
-            await _requestLogger.LogRequestEndAsync(requestId, 500, null, null, finalErrorMessage);
+            await _requestLogger.LogRequestEndAsync(requestId, 500,
+                null, // no response body
+                null, // no response headers
+                finalErrorMessage,
+                null, null, null, // no token info
+                null, // no group id available since all providers failed
+                null, // no provider type available
+                originalModelName, // 使用原始模型名称
+                false, // Anthropic请求通常没有tools
+                false, // 假设流式失败
+                null); // no api key available since all providers failed
 
             return new ProviderHttpResponse
             {
@@ -1866,6 +1951,265 @@ public class MultiProviderService : IMultiProviderService
         {
             var errorMessage = $"Anthropic原生请求处理异常: {ex.Message}";
             _logger.LogError(ex, errorMessage + " - RequestId: {RequestId}", requestId);
+            await _requestLogger.LogRequestEndAsync(requestId, 500,
+                null, // no response body
+                null, // no response headers
+                errorMessage,
+                null, null, null, // no token info
+                null, // no group id available due to exception
+                null, // no provider type available
+                originalModelName, // 使用原始模型名称
+                false, // Anthropic请求通常没有tools
+                false, // 假设流式失败
+                null); // no api key available due to exception
+
+            return new ProviderHttpResponse
+            {
+                IsSuccess = false,
+                StatusCode = 500,
+                ErrorMessage = errorMessage
+            };
+        }
+    }
+
+    /// <summary>
+    /// 处理Responses API HTTP请求（透明代理模式）
+    /// </summary>
+    /// <param name="request">Responses API请求</param>
+    /// <param name="proxyKey">代理密钥</param>
+    /// <param name="providerType">服务商类型</param>
+    /// <param name="clientIp">客户端IP</param>
+    /// <param name="userAgent">用户代理</param>
+    /// <param name="endpoint">请求路径</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>HTTP响应</returns>
+    public async Task<ProviderHttpResponse> ProcessResponsesHttpAsync(
+        ResponsesRequest request,
+        string proxyKey,
+        string providerType,
+        string? clientIp = null,
+        string? userAgent = null,
+        string? endpoint = null,
+        CancellationToken cancellationToken = default)
+    {
+        // 获取代理密钥ID
+        int? proxyKeyId = null;
+        if (!string.IsNullOrEmpty(proxyKey))
+        {
+            var validatedProxyKey = await _keyManager.ValidateProxyKeyAsync(proxyKey);
+            proxyKeyId = validatedProxyKey?.Id;
+        }
+
+        // 保存原始模型名称用于日志记录
+        var originalModelName = request.Model;
+
+        // 记录请求开始
+        var requestId = await _requestLogger.LogRequestStartAsync(
+            "POST",
+            endpoint,
+            JsonConvert.SerializeObject(request),
+            null,
+            proxyKeyId,
+            clientIp,
+            userAgent);
+
+        try
+        {
+            _logger.LogInformation("开始处理Responses API HTTP透明代理请求 - RequestId: {RequestId}, Model: {Model}",
+                requestId, request.Model);
+
+            // 获取最大服务商重试个数配置
+            var maxProviderRetries = _configuration.GetValue<int>("OrchestrationApi:Global:MaxProviderRetries", 3);
+            var triedProviders = new HashSet<string>();
+            var failedGroups = new HashSet<string>();
+            Exception? lastException = null;
+
+            for (int providerAttempt = 0; providerAttempt < maxProviderRetries; providerAttempt++)
+            {
+                string? currentGroupId = null;
+                try
+                {
+                    // 路由请求，传递已失败的分组以实现智能降级
+                    var routeResult = await _router.RouteRequestAsync(originalModelName, proxyKey, providerType, failedGroups);
+                    if (!routeResult.Success)
+                    {
+                        if (!string.IsNullOrEmpty(routeResult.FailedGroupId))
+                        {
+                            failedGroups.Add(routeResult.FailedGroupId);
+                            _logger.LogDebug("RequestId: {RequestId}, 路由失败，将分组 {GroupId} 添加到失败列表: {ErrorMessage}",
+                                requestId, routeResult.FailedGroupId, routeResult.ErrorMessage);
+                        }
+                        throw new InvalidOperationException(routeResult.ErrorMessage);
+                    }
+
+                    currentGroupId = routeResult.Group!.Id;
+
+                    // 检查是否已经尝试过这个服务商
+                    var providerKey = $"{routeResult.Group.ProviderType}_{routeResult.Group.Id}";
+                    if (triedProviders.Contains(providerKey))
+                    {
+                        _logger.LogDebug("RequestId: {RequestId}, 已尝试过服务商 {ProviderKey}，跳过",
+                            requestId, providerKey);
+                        continue;
+                    }
+                    triedProviders.Add(providerKey);
+
+                    _logger.LogDebug("RequestId: {RequestId}, 尝试服务商 {ProviderType} (分组: {GroupId}) - 第 {AttemptNumber} 次",
+                        requestId, routeResult.Group.ProviderType, routeResult.Group.Id, providerAttempt + 1);
+
+                    // 获取服务商实例
+                    var provider = _providerFactory.GetProvider(routeResult.Group.ProviderType);
+                    var providerConfig = BuildProviderConfig(routeResult);
+
+                    // 设置端点类型为responses
+                    providerConfig.EndpointType = "responses";
+
+                    // 准备Responses API请求内容
+                    var httpContent = await PrepareResponsesRequestContentAsync(request, provider, providerConfig, cancellationToken);
+
+                    // 使用统一的重试策略
+                    var maxRetries = routeResult.Group.RetryCount;
+                    for (int attempt = 0; attempt <= maxRetries; attempt++)
+                    {
+                        try
+                        {
+                            // 获取API密钥
+                            var currentApiKey = routeResult.ApiKey;
+                            if (attempt > 0)
+                            {
+                                var newKey = await _keyManager.GetNextKeyAsync(routeResult.Group.Id);
+                                if (string.IsNullOrEmpty(newKey))
+                                {
+                                    if (!failedGroups.Contains(routeResult.Group.Id))
+                                    {
+                                        failedGroups.Add(routeResult.Group.Id);
+                                        _logger.LogDebug("RequestId: {RequestId}, 服务商: {ProviderType}, 分组: {GroupId} 没有更多可用的API密钥",
+                                            requestId, routeResult.Group.ProviderType, routeResult.Group.Id);
+                                    }
+                                    break;
+                                }
+                                currentApiKey = newKey;
+                                providerConfig.ApiKeys = [newKey];
+                            }
+
+                            _logger.LogDebug("发送Responses HTTP请求 - RequestId: {RequestId}, 服务商: {ProviderType}, 分组: {GroupId}, 尝试: {Attempt}",
+                                requestId, routeResult.Group.ProviderType, routeResult.Group.Id, attempt + 1);
+
+                            // 发送HTTP请求
+                            // 注意：假流模式需要发送非流式请求到上游
+                            var actualIsStreaming = providerConfig.FakeStreaming ? false : request.Stream;
+                            var response = await provider.SendHttpRequestAsync(
+                                httpContent, currentApiKey!, providerConfig, actualIsStreaming, cancellationToken);
+
+                            var (shouldRetry, shouldSwitchApiKey, shouldSwitchProvider) = AnalyzeProviderResponse(response, null);
+
+                            if (response.IsSuccess)
+                            {
+                                // 成功处理
+                                await _keyManager.ResetKeyErrorCountAsync(routeResult.Group.Id, currentApiKey!);
+                                await _keyManager.UpdateKeyUsageStatsAsync(routeResult.Group.Id, currentApiKey!);
+
+                                // 更新代理密钥使用统计
+                                if (!string.IsNullOrEmpty(proxyKey))
+                                {
+                                    var validatedProxyKey = await _keyManager.ValidateProxyKeyAsync(proxyKey);
+                                    if (validatedProxyKey != null)
+                                    {
+                                        await _keyManager.UpdateProxyKeyUsageAsync(validatedProxyKey.Id);
+                                    }
+                                }
+
+                                // 记录成功日志
+                                await _requestLogger.LogRequestEndAsync(requestId, response.StatusCode,
+                                    null, response.Headers, null, null, null, null,
+                                    routeResult.Group.Id, routeResult.Group.ProviderType, originalModelName,
+                                    request.Tools?.Any() == true, request.Stream, currentApiKey);
+
+                                _logger.LogInformation("Responses API HTTP透明代理请求成功 - RequestId: {RequestId}, 服务商: {ProviderType}",
+                                    requestId, routeResult.Group.ProviderType);
+
+                                return response;
+                            }
+                            else
+                            {
+                                // 失败处理
+                                await _keyManager.ReportKeyErrorAsync(routeResult.Group.Id, currentApiKey!,
+                                    response.ErrorMessage ?? "HTTP请求失败");
+
+                                _logger.LogWarning("Responses Provider响应失败 - Provider: {ProviderType}, 状态码: {StatusCode}, 错误: {Error}",
+                                    routeResult.Group.ProviderType, response.StatusCode, response.ErrorMessage);
+
+                                if (shouldSwitchProvider) break;
+                                if (!shouldRetry)
+                                {
+                                    await _requestLogger.LogRequestEndAsync(requestId, response.StatusCode, null, response.Headers,
+                                        response.ErrorMessage, null, null, null, routeResult.Group.Id, routeResult.Group.ProviderType,
+                                        originalModelName, request.Tools?.Any() == true, request.Stream, currentApiKey);
+                                    return response;
+                                }
+
+                                if (shouldSwitchApiKey) continue;
+                                if (attempt >= maxRetries) break;
+
+                                var delaySeconds = Math.Min(Math.Pow(2, attempt), 30);
+                                await Task.Delay(TimeSpan.FromSeconds(delaySeconds), cancellationToken);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            lastException = ex;
+                            var (shouldRetry, shouldSwitchApiKey, shouldSwitchProvider) = AnalyzeException(ex);
+
+                            _logger.LogWarning(ex, "Responses Provider异常 - Provider: {ProviderType}, 尝试: {Attempt}",
+                                routeResult.Group.ProviderType, attempt + 1);
+
+                            await _keyManager.ReportKeyErrorAsync(routeResult.Group.Id, routeResult.ApiKey!, ex.Message);
+
+                            if (shouldSwitchProvider) break;
+                            if (!shouldRetry) throw;
+                            if (attempt >= maxRetries) break;
+
+                            var delaySeconds = Math.Min(Math.Pow(2, attempt), 30);
+                            await Task.Delay(TimeSpan.FromSeconds(delaySeconds), cancellationToken);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    lastException = ex;
+                    _logger.LogWarning(ex, "处理Responses API HTTP透明代理请求时发生异常 - RequestId: {RequestId}, 服务商尝试: {ProviderAttempt}",
+                        requestId, providerAttempt + 1);
+
+                    if (!string.IsNullOrEmpty(currentGroupId))
+                    {
+                        failedGroups.Add(currentGroupId);
+                    }
+                }
+            }
+
+            // 所有服务商都失败
+            var errorMessage = triedProviders.Count >= maxProviderRetries
+                ? $"当前代理密钥对于模型 {originalModelName} 无可用服务商"
+                : "暂无可用服务商处理Responses请求";
+
+            _logger.LogError("Responses API HTTP透明代理请求失败 - RequestId: {RequestId}, 已尝试 {TriedProviders} 个服务商",
+                requestId, triedProviders.Count);
+
+            await _requestLogger.LogRequestEndAsync(requestId, 500, null, null, errorMessage,
+                null, null, null, null, null, originalModelName,
+                request.Tools?.Any() == true, request.Stream, null);
+
+            return new ProviderHttpResponse
+            {
+                StatusCode = 500,
+                IsSuccess = false,
+                ErrorMessage = errorMessage
+            };
+        }
+        catch (Exception ex)
+        {
+            var errorMessage = $"Responses API请求处理异常: {ex.Message}";
+            _logger.LogError(ex, errorMessage + " - RequestId: {RequestId}", requestId);
             await _requestLogger.LogRequestEndAsync(requestId, 500, null, null, errorMessage);
 
             return new ProviderHttpResponse
@@ -1874,6 +2218,724 @@ public class MultiProviderService : IMultiProviderService
                 StatusCode = 500,
                 ErrorMessage = errorMessage
             };
+        }
+    }
+
+    /// <summary>
+    /// 准备Responses API请求内容
+    /// </summary>
+    /// <param name="request">Responses API请求</param>
+    /// <param name="provider">Provider实例</param>
+    /// <param name="providerConfig">Provider配置</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>HTTP请求内容</returns>
+    private async Task<HttpContent> PrepareResponsesRequestContentAsync(
+        ResponsesRequest request,
+        ILLMProvider provider,
+        ProviderConfig providerConfig,
+        CancellationToken cancellationToken)
+    {
+        // 根据不同的Provider类型，将Responses请求转换为对应的格式
+        switch (provider)
+        {
+            case OpenAiProvider openAiProvider:
+                // 转换为OpenAI聊天完成格式
+                var chatRequest = ConvertResponsesRequestToChatCompletion(request);
+                return await openAiProvider.PrepareRequestContentAsync(chatRequest, providerConfig, cancellationToken);
+
+            case AnthropicProvider anthropicProvider:
+                // 转换为Anthropic消息格式
+                var anthropicRequest = ConvertResponsesRequestToAnthropic(request);
+                return await anthropicProvider.PrepareAnthropicRequestContentAsync(anthropicRequest, providerConfig, cancellationToken);
+
+            case GeminiProvider geminiProvider:
+                // 转换为Gemini生成内容格式
+                var geminiRequest = ConvertResponsesRequestToGemini(request);
+                return await geminiProvider.PrepareRequestContentAsync(geminiRequest, providerConfig, cancellationToken);
+
+            default:
+                // 默认转换为OpenAI格式
+                var defaultChatRequest = ConvertResponsesRequestToChatCompletion(request);
+                return await provider.PrepareRequestContentAsync(defaultChatRequest, providerConfig, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// 将Responses API请求转换为Anthropic消息请求
+    /// </summary>
+    /// <param name="request">Responses API请求</param>
+    /// <returns>Anthropic消息请求</returns>
+    private AnthropicMessageRequest ConvertResponsesRequestToAnthropic(ResponsesRequest request)
+    {
+        var anthropicRequest = new AnthropicMessageRequest
+        {
+            Model = request.Model,
+            MaxTokens = request.MaxTokens ?? 1024,
+            Stream = request.Stream,
+            Temperature = request.Temperature,
+            TopP = request.TopP
+        };
+
+        var messages = new List<AnthropicMessage>();
+
+        // 处理输入内容
+        if (request.Input is string textInput)
+        {
+            // 基础文本请求
+            messages.Add(new AnthropicMessage
+            {
+                Role = "user",
+                Content = new List<AnthropicContent>
+                {
+                    new AnthropicContent { Type = "text", Text = textInput }
+                }
+            });
+        }
+        else if (request.Input is List<ResponsesInputMessage> messageList)
+        {
+            // 消息格式，转换每个消息
+            foreach (var inputMessage in messageList)
+            {
+                var anthropicMessage = new AnthropicMessage
+                {
+                    Role = inputMessage.Role,
+                    Content = new List<AnthropicContent>()
+                };
+
+                foreach (var content in inputMessage.Content)
+                {
+                    switch (content.Type)
+                    {
+                        case "input_text":
+                            anthropicMessage.Content.Add(new AnthropicContent
+                            {
+                                Type = "text",
+                                Text = content.Text
+                            });
+                            break;
+                        case "input_image":
+                            // Anthropic图像格式需要base64数据
+                            anthropicMessage.Content.Add(new AnthropicContent
+                            {
+                                Type = "image",
+                                Source = new AnthropicImageSource
+                                {
+                                    Type = "base64",
+                                    MediaType = "image/jpeg", // 默认值
+                                    Data = content.ImageUrl ?? ""
+                                }
+                            });
+                            break;
+                        case "input_file":
+                            // 文件内容转为文本
+                            anthropicMessage.Content.Add(new AnthropicContent
+                            {
+                                Type = "text",
+                                Text = $"File: {content.FileUrl}"
+                            });
+                            break;
+                    }
+                }
+
+                messages.Add(anthropicMessage);
+            }
+        }
+
+        anthropicRequest.Messages = messages;
+
+        // 设置系统指令
+        if (!string.IsNullOrEmpty(request.Instructions))
+        {
+            anthropicRequest.System = JToken.FromObject(request.Instructions);
+        }
+
+        // 处理工具
+        if (request.Tools != null && request.Tools.Count > 0)
+        {
+            var anthropicTools = new List<AnthropicTool>();
+
+            foreach (var tool in request.Tools)
+            {
+                if (tool.Type == "function")
+                {
+                    anthropicTools.Add(new AnthropicTool
+                    {
+                        Name = tool.Name ?? "",
+                        Description = tool.Description,
+                        InputSchema = new AnthropicInputSchema
+                        {
+                            Type = "object",
+                            Properties = tool.Parameters as Dictionary<string, AnthropicProperty>,
+                            Required = new List<string>()
+                        }
+                    });
+                }
+            }
+
+            anthropicRequest.Tools = anthropicTools;
+        }
+
+        return anthropicRequest;
+    }
+
+    /// <summary>
+    /// 将Responses API请求转换为Gemini生成内容请求
+    /// </summary>
+    /// <param name="request">Responses API请求</param>
+    /// <returns>Gemini生成内容请求</returns>
+    private GeminiGenerateContentRequest ConvertResponsesRequestToGemini(ResponsesRequest request)
+    {
+        var geminiRequest = new GeminiGenerateContentRequest
+        {
+            Model = request.Model,
+            Contents = new List<GeminiContent>(),
+            GenerationConfig = new GeminiGenerationConfig
+            {
+                Temperature = request.Temperature,
+                TopP = request.TopP,
+                MaxOutputTokens = request.MaxTokens
+            }
+        };
+
+        // 处理系统指令
+        if (!string.IsNullOrEmpty(request.Instructions))
+        {
+            geminiRequest.SystemInstruction = new GeminiContent
+            {
+                Parts = new List<GeminiPart>
+                {
+                    new GeminiPart { Text = request.Instructions }
+                },
+                Role = "system"
+            };
+        }
+
+        // 处理输入内容
+        if (request.Input is string textInput)
+        {
+            // 基础文本请求
+            geminiRequest.Contents.Add(new GeminiContent
+            {
+                Role = "user",
+                Parts = new List<GeminiPart>
+                {
+                    new GeminiPart { Text = textInput }
+                }
+            });
+        }
+        else if (request.Input is List<ResponsesInputMessage> messageList)
+        {
+            // 消息格式
+            foreach (var inputMessage in messageList)
+            {
+                var geminiContent = new GeminiContent
+                {
+                    Role = inputMessage.Role == "user" ? "user" : "model",
+                    Parts = new List<GeminiPart>()
+                };
+
+                foreach (var content in inputMessage.Content)
+                {
+                    switch (content.Type)
+                    {
+                        case "input_text":
+                            geminiContent.Parts.Add(new GeminiPart { Text = content.Text });
+                            break;
+                        case "input_image":
+                            // Gemini图像格式
+                            geminiContent.Parts.Add(new GeminiPart
+                            {
+                                InlineData = new GeminiInlineData
+                                {
+                                    MimeType = "image/jpeg",
+                                    Data = content.ImageUrl ?? ""
+                                }
+                            });
+                            break;
+                        case "input_file":
+                            // 文件内容转为文本
+                            geminiContent.Parts.Add(new GeminiPart { Text = $"File: {content.FileUrl}" });
+                            break;
+                    }
+                }
+
+                geminiRequest.Contents.Add(geminiContent);
+            }
+        }
+
+        // 处理工具
+        if (request.Tools != null && request.Tools.Count > 0)
+        {
+            var geminiTools = new List<GeminiTool>();
+
+            foreach (var tool in request.Tools)
+            {
+                if (tool.Type == "function")
+                {
+                    geminiTools.Add(new GeminiTool
+                    {
+                        FunctionDeclarations = new List<GeminiFunctionDeclaration>
+                        {
+                            new GeminiFunctionDeclaration
+                            {
+                                Name = tool.Name ?? "",
+                                Description = tool.Description,
+                                Parameters = tool.Parameters as GeminiSchema
+                            }
+                        }
+                    });
+                }
+            }
+
+            geminiRequest.Tools = geminiTools;
+        }
+
+        return geminiRequest;
+    }
+
+    /// <summary>
+    /// 将Responses API请求转换为ChatCompletionRequest
+    /// </summary>
+    /// <param name="request">Responses API请求</param>
+    /// <returns>ChatCompletionRequest</returns>
+    private ChatCompletionRequest ConvertResponsesRequestToChatCompletion(ResponsesRequest request)
+    {
+        var chatRequest = new ChatCompletionRequest
+        {
+            Model = request.Model,
+            Stream = request.Stream,
+            Temperature = request.Temperature,
+            TopP = request.TopP,
+            MaxTokens = request.MaxTokens,
+            Stop = request.Stop
+        };
+
+        // 处理不同的输入格式
+        if (request.Input is string textInput)
+        {
+            // 基础文本请求
+            var messages = new List<ChatMessage>
+            {
+                new ChatMessage
+                {
+                    Role = "user",
+                    Content = textInput
+                }
+            };
+
+            // 如果有instructions，作为system消息添加
+            if (!string.IsNullOrEmpty(request.Instructions))
+            {
+                messages.Insert(0, new ChatMessage
+                {
+                    Role = "system",
+                    Content = request.Instructions
+                });
+            }
+
+            chatRequest.Messages = messages;
+        }
+        else if (request.Input is List<ResponsesInputMessage> messageList)
+        {
+            // 消息格式（支持图像、文件等多模态内容）
+            var messages = new List<ChatMessage>();
+
+            // 如果有instructions，作为system消息添加
+            if (!string.IsNullOrEmpty(request.Instructions))
+            {
+                messages.Add(new ChatMessage
+                {
+                    Role = "system",
+                    Content = request.Instructions
+                });
+            }
+
+            foreach (var inputMessage in messageList)
+            {
+                var chatMessage = new ChatMessage
+                {
+                    Role = inputMessage.Role
+                };
+
+                // 处理多模态内容
+                if (inputMessage.Content.Count == 1 && 
+                    inputMessage.Content[0].Type == "input_text")
+                {
+                    // 单纯文本内容
+                    chatMessage.Content = inputMessage.Content[0].Text;
+                }
+                else
+                {
+                    // 多模态内容，转换为OpenAI格式
+                    var contentArray = new List<object>();
+                    
+                    foreach (var content in inputMessage.Content)
+                    {
+                        switch (content.Type)
+                        {
+                            case "input_text":
+                                contentArray.Add(new
+                                {
+                                    type = "text",
+                                    text = content.Text
+                                });
+                                break;
+                            case "input_image":
+                                contentArray.Add(new
+                                {
+                                    type = "image_url",
+                                    image_url = new { url = content.ImageUrl }
+                                });
+                                break;
+                            case "input_file":
+                                // 文件类型需要根据具体Provider处理，这里先作为文本处理
+                                contentArray.Add(new
+                                {
+                                    type = "text",
+                                    text = $"File URL: {content.FileUrl}"
+                                });
+                                break;
+                        }
+                    }
+                    
+                    chatMessage.Content = contentArray;
+                }
+
+                messages.Add(chatMessage);
+            }
+
+            chatRequest.Messages = messages;
+        }
+
+        // 处理工具
+        if (request.Tools != null && request.Tools.Count > 0)
+        {
+            var chatTools = new List<ChatTool>();
+
+            foreach (var tool in request.Tools)
+            {
+                switch (tool.Type)
+                {
+                    case "function":
+                        chatTools.Add(new ChatTool
+                        {
+                            Type = "function",
+                            Function = new ChatFunction
+                            {
+                                Name = tool.Name ?? "",
+                                Description = tool.Description,
+                                Parameters = tool.Parameters
+                            }
+                        });
+                        break;
+                    case "web_search_preview":
+                        // Web搜索工具，转换为函数调用
+                        chatTools.Add(new ChatTool
+                        {
+                            Type = "function",
+                            Function = new ChatFunction
+                            {
+                                Name = "web_search",
+                                Description = "Search the web for current information",
+                                Parameters = new
+                                {
+                                    type = "object",
+                                    properties = new
+                                    {
+                                        query = new
+                                        {
+                                            type = "string",
+                                            description = "The search query"
+                                        }
+                                    },
+                                    required = new[] { "query" }
+                                }
+                            }
+                        });
+                        break;
+                    case "file_search":
+                        // 文件搜索工具
+                        chatTools.Add(new ChatTool
+                        {
+                            Type = "function",
+                            Function = new ChatFunction
+                            {
+                                Name = "file_search",
+                                Description = "Search files in vector store",
+                                Parameters = new
+                                {
+                                    type = "object",
+                                    properties = new
+                                    {
+                                        query = new
+                                        {
+                                            type = "string",
+                                            description = "The search query"
+                                        },
+                                        vector_store_ids = new
+                                        {
+                                            type = "array",
+                                            items = new { type = "string" },
+                                            description = "Vector store IDs to search"
+                                        },
+                                        max_num_results = new
+                                        {
+                                            type = "integer",
+                                            description = "Maximum number of results"
+                                        }
+                                    },
+                                    required = new[] { "query" }
+                                }
+                            }
+                        });
+                        break;
+                }
+            }
+
+            chatRequest.Tools = chatTools;
+
+            // 设置tool_choice
+            if (!string.IsNullOrEmpty(request.ToolChoice))
+            {
+                // Responses API的tool_choice通常是"auto"，直接传递
+                // 这里可能需要根据具体的OpenAI格式进行转换
+            }
+        }
+
+        return chatRequest;
+    }
+
+    /// <summary>
+    /// 检索之前的响应
+    /// </summary>
+    /// <param name="responseId">响应ID</param>
+    /// <param name="proxyKey">代理密钥</param>
+    /// <returns>响应详情</returns>
+    public async Task<ResponsesApiResponse?> RetrieveResponseAsync(string responseId, string proxyKey)
+    {
+        _logger.LogDebug("检索响应 - ResponseId: {ResponseId}, ProxyKey: {ProxyKey}",
+            responseId, string.IsNullOrEmpty(proxyKey) ? "无" : "已提供");
+
+        try
+        {
+            // 验证代理密钥
+            if (string.IsNullOrEmpty(proxyKey))
+            {
+                throw new ArgumentException("ProxyKey is required");
+            }
+
+            var validatedProxyKey = await _keyManager.ValidateProxyKeyAsync(proxyKey);
+            if (validatedProxyKey == null)
+            {
+                throw new UnauthorizedAccessException("Invalid ProxyKey");
+            }
+
+            // 路由到支持Responses API的Provider
+            var routeResult = await _router.RouteRequestAsync("responses", proxyKey, "openai");
+            if (!routeResult.Success)
+            {
+                _logger.LogWarning("路由响应检索请求失败: {ErrorMessage}", routeResult.ErrorMessage);
+                return null;
+            }
+
+            // 获取Provider实例
+            var provider = _providerFactory.GetProvider(routeResult.Group!.ProviderType);
+            var providerConfig = BuildProviderConfig(routeResult);
+
+            // 构建检索请求
+            var retrieveRequest = new
+            {
+                response_id = responseId
+            };
+
+            // 准备HTTP请求内容
+            var httpContent = new StringContent(
+                JsonConvert.SerializeObject(retrieveRequest),
+                System.Text.Encoding.UTF8,
+                "application/json"
+            );
+
+            // 发送HTTP请求到Provider
+            var response = await provider.SendHttpRequestAsync(
+                httpContent, routeResult.ApiKey!, providerConfig, false, CancellationToken.None);
+
+            if (response.IsSuccess && response.ResponseStream != null)
+            {
+                // 读取响应流内容
+                using var reader = new StreamReader(response.ResponseStream);
+                var responseBody = await reader.ReadToEndAsync();
+                
+                if (!string.IsNullOrEmpty(responseBody))
+                {
+                    // 解析响应并返回
+                    var apiResponse = JsonConvert.DeserializeObject<ResponsesApiResponse>(responseBody);
+                    _logger.LogInformation("成功检索响应 - ResponseId: {ResponseId}", responseId);
+                    return apiResponse;
+                }
+            }
+            
+            _logger.LogWarning("检索响应失败 - ResponseId: {ResponseId}, StatusCode: {StatusCode}, Error: {Error}",
+                responseId, response.StatusCode, response.ErrorMessage);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "检索响应时发生异常 - ResponseId: {ResponseId}", responseId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 删除存储的响应
+    /// </summary>
+    /// <param name="responseId">响应ID</param>
+    /// <param name="proxyKey">代理密钥</param>
+    /// <returns>是否删除成功</returns>
+    public async Task<bool> DeleteResponseAsync(string responseId, string proxyKey)
+    {
+        _logger.LogDebug("删除响应 - ResponseId: {ResponseId}, ProxyKey: {ProxyKey}",
+            responseId, string.IsNullOrEmpty(proxyKey) ? "无" : "已提供");
+
+        try
+        {
+            // 验证代理密钥
+            if (string.IsNullOrEmpty(proxyKey))
+            {
+                throw new ArgumentException("ProxyKey is required");
+            }
+
+            var validatedProxyKey = await _keyManager.ValidateProxyKeyAsync(proxyKey);
+            if (validatedProxyKey == null)
+            {
+                throw new UnauthorizedAccessException("Invalid ProxyKey");
+            }
+
+            // 路由到支持Responses API的Provider
+            var routeResult = await _router.RouteRequestAsync("responses", proxyKey, "openai");
+            if (!routeResult.Success)
+            {
+                _logger.LogWarning("路由响应删除请求失败: {ErrorMessage}", routeResult.ErrorMessage);
+                return false;
+            }
+
+            // 获取Provider实例
+            var provider = _providerFactory.GetProvider(routeResult.Group!.ProviderType);
+            var providerConfig = BuildProviderConfig(routeResult);
+
+            // 构建删除请求
+            var deleteRequest = new
+            {
+                response_id = responseId
+            };
+
+            // 准备HTTP请求内容
+            var httpContent = new StringContent(
+                JsonConvert.SerializeObject(deleteRequest),
+                System.Text.Encoding.UTF8,
+                "application/json"
+            );
+
+            // 发送HTTP DELETE请求到Provider
+            var response = await provider.SendHttpRequestAsync(
+                httpContent, routeResult.ApiKey!, providerConfig, false, CancellationToken.None);
+
+            if (response.IsSuccess)
+            {
+                _logger.LogInformation("成功删除响应 - ResponseId: {ResponseId}", responseId);
+                return true;
+            }
+            else
+            {
+                _logger.LogWarning("删除响应失败 - ResponseId: {ResponseId}, StatusCode: {StatusCode}, Error: {Error}",
+                    responseId, response.StatusCode, response.ErrorMessage);
+                return false;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "删除响应时发生异常 - ResponseId: {ResponseId}", responseId);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 取消后台响应任务
+    /// </summary>
+    /// <param name="responseId">响应ID</param>
+    /// <param name="proxyKey">代理密钥</param>
+    /// <returns>取消结果</returns>
+    public async Task<ResponsesApiResponse?> CancelResponseAsync(string responseId, string proxyKey)
+    {
+        _logger.LogDebug("取消响应 - ResponseId: {ResponseId}, ProxyKey: {ProxyKey}",
+            responseId, string.IsNullOrEmpty(proxyKey) ? "无" : "已提供");
+
+        try
+        {
+            // 验证代理密钥
+            if (string.IsNullOrEmpty(proxyKey))
+            {
+                throw new ArgumentException("ProxyKey is required");
+            }
+
+            var validatedProxyKey = await _keyManager.ValidateProxyKeyAsync(proxyKey);
+            if (validatedProxyKey == null)
+            {
+                throw new UnauthorizedAccessException("Invalid ProxyKey");
+            }
+
+            // 路由到支持Responses API的Provider
+            var routeResult = await _router.RouteRequestAsync("responses", proxyKey, "openai");
+            if (!routeResult.Success)
+            {
+                _logger.LogWarning("路由响应取消请求失败: {ErrorMessage}", routeResult.ErrorMessage);
+                return null;
+            }
+
+            // 获取Provider实例
+            var provider = _providerFactory.GetProvider(routeResult.Group!.ProviderType);
+            var providerConfig = BuildProviderConfig(routeResult);
+
+            // 构建取消请求
+            var cancelRequest = new
+            {
+                response_id = responseId,
+                action = "cancel"
+            };
+
+            // 准备HTTP请求内容
+            var httpContent = new StringContent(
+                JsonConvert.SerializeObject(cancelRequest),
+                System.Text.Encoding.UTF8,
+                "application/json"
+            );
+
+            // 发送HTTP POST请求到Provider进行取消操作
+            var response = await provider.SendHttpRequestAsync(
+                httpContent, routeResult.ApiKey!, providerConfig, false, CancellationToken.None);
+
+            if (response.IsSuccess && response.ResponseStream != null)
+            {
+                // 读取响应流内容
+                using var reader = new StreamReader(response.ResponseStream);
+                var responseBody = await reader.ReadToEndAsync();
+                
+                if (!string.IsNullOrEmpty(responseBody))
+                {
+                    // 解析响应并返回
+                    var apiResponse = JsonConvert.DeserializeObject<ResponsesApiResponse>(responseBody);
+                    _logger.LogInformation("成功取消响应 - ResponseId: {ResponseId}", responseId);
+                    return apiResponse;
+                }
+            }
+            
+            _logger.LogWarning("取消响应失败 - ResponseId: {ResponseId}, StatusCode: {StatusCode}, Error: {Error}",
+                responseId, response.StatusCode, response.ErrorMessage);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "取消响应时发生异常 - ResponseId: {ResponseId}", responseId);
+            return null;
         }
     }
 

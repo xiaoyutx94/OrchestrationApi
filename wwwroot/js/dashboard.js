@@ -308,6 +308,7 @@ function multiProviderDashboard() {
             model_mappings: {},
             headers: {},
             priority: 0,
+            fake_streaming: false, // 假流模式配置
             proxy_enabled: false,
             proxy_config: {
                 type: "http",
@@ -434,7 +435,6 @@ function multiProviderDashboard() {
             try {
                 const token = localStorage.getItem('authToken');
                 if (!token) {
-                    console.log('No auth token found');
                     return false;
                 }
 
@@ -456,15 +456,12 @@ function multiProviderDashboard() {
                                 role: data.user.role || 'Admin'
                             };
                         }
-                        console.log('Authentication check passed');
                         return true;
                     } else {
-                        console.log('Token validation failed:', data.message);
                         localStorage.removeItem('authToken');
                         return false;
                     }
                 } else {
-                    console.log('Auth verification failed with status:', response.status);
                     localStorage.removeItem('authToken');
                     return false;
                 }
@@ -656,9 +653,7 @@ function multiProviderDashboard() {
 
                 if (response.ok) {
                     const data = await response.json();
-                    console.log('loadProviderStatuses response:', data);
                     this.providerStatuses = data.groups || {};
-                    console.log('providerStatuses after update:', this.providerStatuses);
                     this.filterProviders();
                     // this.showMessage('服务商分组状态已更新', 'success');
                 } else {
@@ -705,7 +700,6 @@ function multiProviderDashboard() {
                 if (response.ok) {
                     const data = await response.json();
                     this.allConfiguredAliases = data.aliases || [];
-                    console.log('已加载所有配置的模型别名:', this.allConfiguredAliases.length, '个');
                 } else {
                     console.error('加载所有配置别名失败:', response.status);
                 }
@@ -1912,6 +1906,7 @@ function multiProviderDashboard() {
                     test_model: this.groupFormData.test_model || null,
                     priority: this.groupFormData.priority || 0,
                     enabled: this.groupFormData.enabled !== undefined ? this.groupFormData.enabled : true,
+                    fake_streaming: this.groupFormData.fake_streaming || false, // 添加假流配置
                     proxy_enabled: this.groupFormData.proxy_enabled || false,
                     proxy_config: this.groupFormData.proxy_enabled ? {
                         type: this.groupFormData.proxy_config.type || "http",
@@ -1952,19 +1947,15 @@ function multiProviderDashboard() {
                 const data = await response.json();
 
                 if (response.ok) {
-                    console.log('submitGroupForm response:', data);
                     this.showMessage(data.message, "success");
 
                     // 无论是创建还是编辑模式，都重新加载服务商状态以确保数据一致性
                     // 特别是在编辑时修改了API密钥列表的情况下，需要更新密钥数量显示
-                    console.log('Group operation completed, reloading provider statuses...');
                     this.closeGroupModal();
                     await this.loadProviderStatuses();
-                    console.log('Provider statuses reloaded:', this.providerStatuses);
                     
                     // 重新加载密钥状态以确保密钥数量正确显示
                     await this.loadKeyStatus();
-                    console.log('Key status reloaded to refresh key counts');
 
                     // 如果是编辑模式，恢复页面状态以保持用户体验
                     if (!this.showCreateGroupModal && this.editingGroupId) {
@@ -2034,6 +2025,7 @@ function multiProviderDashboard() {
                 model_mappings: {},
                 headers: {},
                 priority: 0,
+                fake_streaming: false, // 假流模式配置
                 proxy_enabled: false,
                 proxy_config: {
                     type: "http",
@@ -2078,6 +2070,7 @@ function multiProviderDashboard() {
         onProviderTypeChange() {
             const defaultBaseUrls = {
                 openai: "https://api.openai.com/v1",
+                openai_responses: "https://api.openai.com/v1",
                 anthropic: "https://api.anthropic.com",
                 gemini: "https://generativelanguage.googleapis.com",
                 azure_openai:
@@ -3042,6 +3035,244 @@ function multiProviderDashboard() {
             }
         },
 
+        // 加载模型并自动选择（基于系统中已存在的模型）
+        async loadAvailableModelsAndAutoSelect() {
+            this.showMessage("开始加载模型并自动选择...", "info");
+
+            // 设置加载状态
+            this.loadingModels = true;
+
+            try {
+                // 先调用原有的加载模型逻辑
+                await this.loadAvailableModels();
+
+
+                if (this.availableModels.length === 0) {
+                    this.showMessage("没有加载到任何可用模型", "warning");
+                    return;
+                }
+                // 获取两组独立数据：系统模型数据 + 历史别名映射数据
+                const [groupsResponse, aliasesResponse] = await Promise.all([
+                    fetch('/admin/groups/manage'),  // 系统模型数据
+                    fetch('/admin/models/all-aliases')  // 历史别名映射数据
+                ]);
+
+                if (!groupsResponse.ok || !aliasesResponse.ok) {
+                    this.showMessage("获取系统数据失败", "error");
+                    return;
+                }
+
+                const groupsData = await groupsResponse.json();
+                const historicalAliasesData = await aliasesResponse.json();
+                
+
+                // 收集所有分组中已配置的实际模型名称（去重）
+                const existingModels = new Set();
+
+                if (groupsData.success && groupsData.groups) {
+                    const groupEntries = Object.entries(groupsData.groups);
+                    let enabledGroupCount = 0;
+                    let groupsWithModels = 0;
+
+                    groupEntries.forEach(([groupId, group]) => {
+
+                        if (group.enabled) {
+                            enabledGroupCount++;
+                            if (group.models && Array.isArray(group.models) && group.models.length > 0) {
+                                groupsWithModels++;
+                                group.models.forEach(model => {
+                                    if (model && model.trim()) {
+                                        existingModels.add(model.trim());
+                                    }
+                                });
+                            } else {
+                                console.warn(`启用的分组 ${group.group_name} 没有模型配置`);
+                            }
+                        }
+                    });
+
+                }
+
+
+                // 获取当前分组的别名映射（用于匹配）
+                const currentAliasMapping = new Map(); // key: 别名, value: [实际模型名数组]
+                if (groupsData.success && groupsData.groups) {
+                    let groupsWithAliases = 0;
+                    Object.entries(groupsData.groups).forEach(([groupId, group]) => {
+                        if (group.enabled) {
+                            if (group.model_aliases && typeof group.model_aliases === 'object' && Object.keys(group.model_aliases).length > 0) {
+                                groupsWithAliases++;
+                                Object.entries(group.model_aliases).forEach(([alias, actualModel]) => {
+                                    if (alias && actualModel && alias.trim() && actualModel.trim()) {
+                                        const aliasKey = alias.trim();
+                                        const modelValue = actualModel.trim();
+                                        
+                                        // 合并映射：一个别名可以指向多个模型
+                                        if (!currentAliasMapping.has(aliasKey)) {
+                                            currentAliasMapping.set(aliasKey, []);
+                                        }
+                                        const existingModels = currentAliasMapping.get(aliasKey);
+                                        if (!existingModels.includes(modelValue)) {
+                                            existingModels.push(modelValue);
+                                        }
+                                    }
+                                });
+                            }
+                        }
+                    });
+                }
+
+                // 将历史别名数据也添加到当前别名映射中（用于匹配）
+                if (historicalAliasesData.success && historicalAliasesData.aliases) {
+                    historicalAliasesData.aliases.forEach(aliasInfo => {
+                        const actualModel = aliasInfo.actual_model;
+                        const alias = aliasInfo.alias;
+                        
+                        if (actualModel && alias && alias.trim() && actualModel.trim()) {
+                            const aliasKey = alias.trim();
+                            const modelValue = actualModel.trim();
+                            
+                            // 合并历史别名映射
+                            if (!currentAliasMapping.has(aliasKey)) {
+                                currentAliasMapping.set(aliasKey, []);
+                            }
+                            const existingModels = currentAliasMapping.get(aliasKey);
+                            if (!existingModels.includes(modelValue)) {
+                                existingModels.push(modelValue);
+                            }
+                        }
+                    });
+                }
+
+                // 构建历史别名映射数据（用于第二阶段添加额外别名）
+                const historicalAliasMapping = new Map(); // key: 实际模型名, value: [别名数组]
+                if (historicalAliasesData.success && historicalAliasesData.aliases) {
+                    historicalAliasesData.aliases.forEach(aliasInfo => {
+                        const actualModel = aliasInfo.actual_model;
+                        const alias = aliasInfo.alias;
+                        
+                        if (actualModel && alias) {
+                            if (!historicalAliasMapping.has(actualModel)) {
+                                historicalAliasMapping.set(actualModel, []);
+                            }
+                            historicalAliasMapping.get(actualModel).push(alias);
+                        }
+                    });
+                }
+
+                // 自动选择匹配的模型（恢复原有逻辑）
+                let autoSelectedCount = 0;
+                const matchDetails = [];
+                const selectedModels = []; // 记录选中的模型
+
+                this.availableModels.forEach(model => {
+                    const modelId = model.id;
+                    let shouldSelect = false;
+                    let matchReason = '';
+
+                    // 1. 检查是否在已存在的模型列表中（直接匹配）
+                    if (existingModels.has(modelId)) {
+                        shouldSelect = true;
+                        matchReason = '直接匹配已存在模型';
+                    }
+
+                    // 2. 检查是否有别名映射指向这个模型（无论是否已经匹配）
+                    let foundAliases = [];
+                    for (const [alias, actualModels] of currentAliasMapping) {
+                        if (actualModels.includes(modelId)) {
+                            foundAliases.push(`${alias} -> ${modelId}`);
+                            if (!shouldSelect) {
+                                shouldSelect = true;
+                                matchReason = `通过别名 "${alias}" 匹配`;
+                            }
+                            // 无论如何都要设置别名映射
+                            if (!this.groupFormData.model_aliases) {
+                                this.groupFormData.model_aliases = {};
+                            }
+                            this.groupFormData.model_aliases[alias] = modelId;
+                        }
+                    }
+                    if (foundAliases.length > 0) {
+                    }
+
+                    // 3. 检查当前模型是否本身就是一个别名
+                    if (!shouldSelect && currentAliasMapping.has(modelId)) {
+                        const actualModels = currentAliasMapping.get(modelId);
+                        // 检查这些实际模型是否有任何一个在系统中存在
+                        for (const actualModel of actualModels) {
+                            if (existingModels.has(actualModel)) {
+                                shouldSelect = true;
+                                matchReason = `作为别名匹配到实际模型 "${actualModel}"`;
+                                // 设置别名映射
+                                if (!this.groupFormData.model_aliases) {
+                                    this.groupFormData.model_aliases = {};
+                                }
+                                this.groupFormData.model_aliases[modelId] = actualModel;
+                                break; // 找到第一个有效的实际模型就停止
+                            }
+                        }
+                    }
+
+                    if (shouldSelect && !this.groupFormData.models.includes(modelId)) {
+                        this.groupFormData.models.push(modelId);
+                        selectedModels.push(modelId);
+                        autoSelectedCount++;
+                        matchDetails.push(`${modelId} (${matchReason})`);
+                    } else if (shouldSelect) {
+                        selectedModels.push(modelId); // 仍然记录为选中，用于后续历史别名检查
+                    }
+                });
+
+                // 第二阶段：为选中的模型检查并添加历史别名映射
+                let aliasAddedCount = 0;
+                const aliasDetails = [];
+
+                selectedModels.forEach(modelId => {
+                    // 检查该模型是否在历史别名映射中存在
+                    if (historicalAliasMapping.has(modelId)) {
+                        const aliases = historicalAliasMapping.get(modelId);
+                        
+                        // 初始化别名映射对象
+                        if (!this.groupFormData.model_aliases) {
+                            this.groupFormData.model_aliases = {};
+                        }
+
+                        // 添加所有历史别名映射
+                        aliases.forEach(alias => {
+                            this.groupFormData.model_aliases[alias] = modelId;
+                            aliasAddedCount++;
+                            aliasDetails.push(`${alias} -> ${modelId}`);
+                        });
+                    }
+                });
+
+                // 同步到文本框
+                this.syncModelsToText();
+                this.syncAliasesToText();
+
+                // 生成结果消息
+                let resultMessage = '';
+                if (autoSelectedCount > 0) {
+                    resultMessage = `自动选择了 ${autoSelectedCount} 个模型`;
+                    if (aliasAddedCount > 0) {
+                        resultMessage += `，并添加了 ${aliasAddedCount} 个历史别名映射`;
+                    }
+                    this.showMessage(resultMessage, "success");
+                } else {
+                    this.showMessage(
+                        `没有找到匹配的模型。可用模型 ${this.availableModels.length} 个，系统模型 ${existingModels.size} 个，请检查模型名称是否一致`,
+                        "warning"
+                    );
+                }
+
+            } catch (error) {
+                this.showMessage(`自动选择模型时出错: ${error.message}`, "error");
+            } finally {
+                // 确保加载状态被重置
+                this.loadingModels = false;
+            }
+        },
+
         // 筛选模型
         filterModels() {
             if (!this.modelSearchQuery.trim()) {
@@ -3091,6 +3322,27 @@ function multiProviderDashboard() {
         // 将预选模型列表同步到文本框
         syncModelsToText() {
             this.modelsText = this.groupFormData.models.join('\n');
+        },
+
+        // 将自动匹配的别名映射同步到模型映射列表
+        syncAliasesToText() {
+            if (this.groupFormData.model_aliases && Object.keys(this.groupFormData.model_aliases).length > 0) {
+                // 将 model_aliases 对象转换为 modelMappings 数组格式
+                for (const [alias, originalModel] of Object.entries(this.groupFormData.model_aliases)) {
+                    // 检查是否已经存在相同的映射，避免重复添加
+                    const existingMapping = this.modelMappings.find(mapping => 
+                        mapping.alias === alias && mapping.original === originalModel
+                    );
+                    
+                    if (!existingMapping) {
+                        this.modelMappings.push({
+                            alias: alias,
+                            original: originalModel
+                        });
+                    }
+                }
+                
+            }
         },
 
         // 将文本框内容同步到预选模型列表
@@ -3276,7 +3528,6 @@ function multiProviderDashboard() {
             // 如果找到了相似度较高的别名，自动设置
             if (bestMatch && highestSimilarity > 0.3) {
                 mapping.alias = bestMatch;
-                console.log(`为模型 "${mapping.original}" 自动选择了相似别名 "${bestMatch}"，相似度: ${(highestSimilarity * 100).toFixed(1)}%`);
             }
         },
 
@@ -4196,16 +4447,75 @@ function multiProviderDashboard() {
 
         // 分组选择配置相关方法
         getGroupsForWeightConfig(allowed_groups) {
+            let groups;
             // 如果没有选择任何分组，返回所有启用的分组
             if (allowed_groups.length === 0) {
-                return Object.keys(this.providerStatuses).filter(
+                groups = Object.keys(this.providerStatuses).filter(
                     (groupId) =>
                         this.providerStatuses[groupId] &&
                         this.providerStatuses[groupId].enabled,
                 );
+            } else {
+                // 否则返回选择的分组
+                groups = allowed_groups;
             }
-            // 否则返回选择的分组
-            return allowed_groups;
+            
+            // 按权重或优先级倒序排序（数值越大越靠前）
+            return this.sortGroupsByWeightDesc(groups);
+        },
+
+        // 按权重倒序排序分组（数值越大越靠前）
+        sortGroupsByWeightDesc(groups) {
+            if (!groups || groups.length <= 1) {
+                return groups;
+            }
+
+            // 获取当前策略和权重配置
+            const strategy = this.getCurrentStrategy();
+            const weights = this.getCurrentWeights();
+            
+            // 按权重倒序排序
+            return groups.slice().sort((a, b) => {
+                const weightA = this.getGroupWeightValue(a, weights);
+                const weightB = this.getGroupWeightValue(b, weights);
+                return weightB - weightA; // 倒序：数值越大越靠前
+            });
+        },
+
+        // 获取当前策略
+        getCurrentStrategy() {
+            if (this.editingProxyKey && this.editingProxyKey.group_selection_config) {
+                return this.editingProxyKey.group_selection_config.strategy;
+            }
+            if (this.newProxyKey && this.newProxyKey.group_selection_config) {
+                return this.newProxyKey.group_selection_config.strategy;
+            }
+            return 'round_robin';
+        },
+
+        // 获取当前权重配置
+        getCurrentWeights() {
+            if (this.editingProxyKey && this.editingProxyKey.group_selection_config) {
+                return this.editingProxyKey.group_selection_config.group_weights || [];
+            }
+            if (this.newProxyKey && this.newProxyKey.group_selection_config) {
+                return this.newProxyKey.group_selection_config.group_weights || [];
+            }
+            return [];
+        },
+
+        // 获取分组的权重值
+        getGroupWeightValue(groupId, weights) {
+            const weight = weights.find(w => w.group_id === groupId);
+            return weight ? (parseInt(weight.weight) || 1) : 1;
+        },
+
+        // 获取按权重倒序排序的分组权重列表
+        getSortedGroupWeights(weights) {
+            if (!weights || !Array.isArray(weights)) {
+                return [];
+            }
+            return weights.slice().sort((a, b) => (b.weight || 1) - (a.weight || 1));
         },
 
         onNewProxyKeyStrategyChange() {
@@ -4225,7 +4535,7 @@ function multiProviderDashboard() {
 
                 const snapshot = this.newProxyKeyWeightsSnapshot[currentStrategy] || [];
 
-                this.newProxyKey.group_selection_config.group_weights = groups.map((groupId) => {
+                const weights = groups.map((groupId) => {
                     const snap = snapshot.find(w => w.group_id === groupId);
                     if (snap) {
                         return { group_id: groupId, weight: parseInt(snap.weight) || 1 };
@@ -4233,6 +4543,9 @@ function multiProviderDashboard() {
                     const existingWeight = validWeights.find(w => w.group_id === groupId);
                     return existingWeight || { group_id: groupId, weight: 1 };
                 });
+                
+                // 按权重倒序排序（数值越大越靠前）
+                this.newProxyKey.group_selection_config.group_weights = weights.sort((a, b) => b.weight - a.weight);
             }
             // 更新当前策略为“上一策略”
             this._newProxyKeyPrevStrategy = currentStrategy;
@@ -4254,7 +4567,7 @@ function multiProviderDashboard() {
 
                 const snapshot = this.editingProxyKeyWeightsSnapshot[currentStrategy] || [];
 
-                this.editingProxyKey.group_selection_config.group_weights = groups.map((groupId) => {
+                const weights = groups.map((groupId) => {
                     const snap = snapshot.find(w => w.group_id === groupId);
                     if (snap) {
                         return { group_id: groupId, weight: parseInt(snap.weight) || 1 };
@@ -4262,6 +4575,9 @@ function multiProviderDashboard() {
                     const existingWeight = validWeights.find(w => w.group_id === groupId);
                     return existingWeight || { group_id: groupId, weight: 1 };
                 });
+                
+                // 按权重倒序排序（数值越大越靠前）
+                this.editingProxyKey.group_selection_config.group_weights = weights.sort((a, b) => b.weight - a.weight);
             }
             this._editingProxyKeyPrevStrategy = currentStrategy;
         },
@@ -4279,7 +4595,7 @@ function multiProviderDashboard() {
                 : currentWeights.filter(w => this.editingProxyKey.allowed_groups.includes(w.group_id));
 
             // 为缺少权重配置的分组添加默认权重，保留已有的权重值
-            this.editingProxyKey.group_selection_config.group_weights = groups.map((groupId) => {
+            const weights = groups.map((groupId) => {
                 const existingWeight = validWeights.find(w => w.group_id === groupId);
                 if (existingWeight) {
                     // 返回现有的权重配置，保持用户设置的权重值
@@ -4292,6 +4608,9 @@ function multiProviderDashboard() {
                     };
                 }
             });
+            
+            // 按权重倒序排序（数值越大越靠前）
+            this.editingProxyKey.group_selection_config.group_weights = weights.sort((a, b) => b.weight - a.weight);
         },
 
         getGroupWeight(groupId) {
@@ -4317,6 +4636,10 @@ function multiProviderDashboard() {
                     },
                 );
             }
+            
+            // 重新按权重倒序排序（数值越大越靠前）
+            this.newProxyKey.group_selection_config.group_weights.sort((a, b) => b.weight - a.weight);
+            
             // 同步更新当前策略的快照
             const currentStrategy = this.newProxyKey.group_selection_config.strategy || "round_robin";
             this.newProxyKeyWeightsSnapshot[currentStrategy] = JSON.parse(JSON.stringify(this.newProxyKey.group_selection_config.group_weights || []));
@@ -4345,6 +4668,10 @@ function multiProviderDashboard() {
                     },
                 );
             }
+            
+            // 重新按权重倒序排序（数值越大越靠前）
+            this.editingProxyKey.group_selection_config.group_weights.sort((a, b) => b.weight - a.weight);
+            
             // 同步更新当前策略的快照
             const currentStrategyEdit = this.editingProxyKey.group_selection_config.strategy || "round_robin";
             this.editingProxyKeyWeightsSnapshot[currentStrategyEdit] = JSON.parse(JSON.stringify(this.editingProxyKey.group_selection_config.group_weights || []));

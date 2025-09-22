@@ -181,18 +181,52 @@ public class RequestLogger : IRequestLogger
     private readonly ILogger<RequestLogger> _logger;
     private readonly RequestLoggingOptions _options;
     private readonly Dictionary<string, DateTime> _requestStartTimes = new();
+    private readonly IServiceProvider _serviceProvider;
 
-    public RequestLogger(ISqlSugarClient db, ILogger<RequestLogger> logger, IOptions<RequestLoggingOptions> options)
+    public RequestLogger(ISqlSugarClient db, ILogger<RequestLogger> logger, IOptions<RequestLoggingOptions> options, IServiceProvider serviceProvider)
     {
         _db = db;
         _logger = logger;
         _options = options.Value;
+        _serviceProvider = serviceProvider;
     }
 
     public async Task LogRequestAsync(RequestLog requestLog)
     {
         if (!_options.Enabled) return;
 
+        // 如果启用了异步队列，则加入队列
+        if (_options.Queue.Enabled)
+        {
+            var queueItem = new LogQueueItem
+            {
+                Type = LogQueueItemType.Insert,
+                RequestId = requestLog.RequestId,
+                LogData = requestLog
+            };
+
+            var logProcessingService = _serviceProvider.GetService<OrchestrationApi.Services.Background.AsyncLogProcessingService>();
+            if (logProcessingService != null)
+            {
+                var success = logProcessingService.EnqueueLog(queueItem);
+                if (!success)
+                {
+                    _logger.LogWarning("无法将日志加入队列，回退到同步模式: {RequestId}", requestLog.RequestId);
+                    await LogRequestSyncAsync(requestLog);
+                }
+                return;
+            }
+        }
+
+        // 同步模式或队列服务不可用时的回退
+        await LogRequestSyncAsync(requestLog);
+    }
+
+    /// <summary>
+    /// 同步记录请求日志
+    /// </summary>
+    private async Task LogRequestSyncAsync(RequestLog requestLog)
+    {
         try
         {
             await _db.Insertable(requestLog).ExecuteCommandAsync();
@@ -239,7 +273,37 @@ public class RequestLogger : IRequestLogger
                 requestLog.ContentTruncated = truncated || headerTruncated;
             }
 
-            await _db.Insertable(requestLog).ExecuteCommandAsync();
+            // 如果启用了异步队列，则加入队列
+            if (_options.Queue.Enabled)
+            {
+                var queueItem = new LogQueueItem
+                {
+                    Type = LogQueueItemType.Insert,
+                    RequestId = requestId,
+                    LogData = requestLog
+                };
+
+                var logProcessingService = _serviceProvider.GetService<OrchestrationApi.Services.Background.AsyncLogProcessingService>();
+                if (logProcessingService != null)
+                {
+                    var success = logProcessingService.EnqueueLog(queueItem);
+                    if (!success)
+                    {
+                        _logger.LogWarning("无法将日志加入队列，回退到同步模式: {RequestId}", requestId);
+                        await _db.Insertable(requestLog).ExecuteCommandAsync();
+                    }
+                }
+                else
+                {
+                    // 队列服务不可用，回退到同步模式
+                    await _db.Insertable(requestLog).ExecuteCommandAsync();
+                }
+            }
+            else
+            {
+                // 同步模式
+                await _db.Insertable(requestLog).ExecuteCommandAsync();
+            }
         }
         catch (Exception ex)
         {
@@ -265,25 +329,22 @@ public class RequestLogger : IRequestLogger
                 _requestStartTimes.Remove(requestId);
             }
 
-            // 获取现有日志记录以检查是否已截断
-            var existingLog = await _db.Queryable<RequestLog>()
-                .Where(rl => rl.RequestId == requestId)
-                .FirstAsync();
-
             string? responseBodyToSave = null;
             string? responseHeadersToSave = null;
-            bool contentTruncated = existingLog?.ContentTruncated ?? false;
+            bool contentTruncated = false;
 
             if (_options.EnableDetailedContent)
             {
                 responseBodyToSave = TruncateContent(responseBody, out bool responseTruncated);
                 responseHeadersToSave = TruncateContent(responseHeaders != null ?
                     string.Join(";", responseHeaders.Select(h => $"{h.Key}:{h.Value}")) : null, out bool headerTruncated);
-                contentTruncated = contentTruncated || responseTruncated || headerTruncated;
+                contentTruncated = responseTruncated || headerTruncated;
             }
 
-            await _db.Updateable<RequestLog>()
-                .SetColumns(it => new RequestLog
+            // 如果启用了异步队列，则加入队列
+            if (_options.Queue.Enabled)
+            {
+                var updateData = new LogUpdateData
                 {
                     StatusCode = statusCode,
                     DurationMs = durationMs,
@@ -300,14 +361,86 @@ public class RequestLogger : IRequestLogger
                     ResponseHeaders = responseHeadersToSave,
                     ContentTruncated = contentTruncated,
                     OpenrouterKey = MaskApiKey(openrouterKey)
-                })
-                .Where(rl => rl.RequestId == requestId)
-                .ExecuteCommandAsync();
+                };
+
+                var queueItem = new LogQueueItem
+                {
+                    Type = LogQueueItemType.Update,
+                    RequestId = requestId,
+                    UpdateData = updateData
+                };
+
+                var logProcessingService = _serviceProvider.GetService<OrchestrationApi.Services.Background.AsyncLogProcessingService>();
+                if (logProcessingService != null)
+                {
+                    var success = logProcessingService.EnqueueLog(queueItem);
+                    if (!success)
+                    {
+                        _logger.LogWarning("无法将更新日志加入队列，回退到同步模式: {RequestId}", requestId);
+                        await LogRequestEndSyncAsync(requestId, statusCode, durationMs, groupId, providerType, model,
+                            promptTokens, completionTokens, totalTokens, errorMessage, hasTools, isStreaming,
+                            responseBodyToSave, responseHeadersToSave, contentTruncated, MaskApiKey(openrouterKey));
+                    }
+                }
+                else
+                {
+                    // 队列服务不可用，回退到同步模式
+                    await LogRequestEndSyncAsync(requestId, statusCode, durationMs, groupId, providerType, model,
+                        promptTokens, completionTokens, totalTokens, errorMessage, hasTools, isStreaming,
+                        responseBodyToSave, responseHeadersToSave, contentTruncated, MaskApiKey(openrouterKey));
+                }
+            }
+            else
+            {
+                // 同步模式
+                await LogRequestEndSyncAsync(requestId, statusCode, durationMs, groupId, providerType, model,
+                    promptTokens, completionTokens, totalTokens, errorMessage, hasTools, isStreaming,
+                    responseBodyToSave, responseHeadersToSave, contentTruncated, MaskApiKey(openrouterKey));
+            }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "完成请求日志记录时发生异常: {RequestId}", requestId);
         }
+    }
+
+    /// <summary>
+    /// 同步完成请求日志记录
+    /// </summary>
+    private async Task LogRequestEndSyncAsync(string requestId, int statusCode, long durationMs,
+        string? groupId, string? providerType, string? model, int? promptTokens, int? completionTokens,
+        int? totalTokens, string? errorMessage, bool hasTools, bool isStreaming,
+        string? responseBody, string? responseHeaders, bool contentTruncated, string? openrouterKey)
+    {
+        // 获取现有日志记录以检查是否已截断
+        var existingLog = await _db.Queryable<RequestLog>()
+            .Where(rl => rl.RequestId == requestId)
+            .FirstAsync();
+
+        // 合并截断状态
+        var finalContentTruncated = (existingLog?.ContentTruncated ?? false) || contentTruncated;
+
+        await _db.Updateable<RequestLog>()
+            .SetColumns(it => new RequestLog
+            {
+                StatusCode = statusCode,
+                DurationMs = durationMs,
+                GroupId = groupId,
+                ProviderType = providerType,
+                Model = model,
+                PromptTokens = promptTokens,
+                CompletionTokens = completionTokens,
+                TotalTokens = totalTokens,
+                ErrorMessage = errorMessage,
+                HasTools = hasTools,
+                IsStreaming = isStreaming,
+                ResponseBody = responseBody,
+                ResponseHeaders = responseHeaders,
+                ContentTruncated = finalContentTruncated,
+                OpenrouterKey = openrouterKey
+            })
+            .Where(rl => rl.RequestId == requestId)
+            .ExecuteCommandAsync();
     }
 
     public async Task<PagedLogsResult> GetLogsAsync(int page = 1, int pageSize = 20, string? proxyKeyFilter = null,

@@ -16,7 +16,6 @@ namespace OrchestrationApi.Controllers;
 public class GeminiController : ControllerBase
 {
     private readonly IMultiProviderService _multiProviderService;
-    private readonly IProviderFactory _providerFactory;
     private readonly ILogger<GeminiController> _logger;
     private readonly string _providerType = "gemini";
 
@@ -26,7 +25,6 @@ public class GeminiController : ControllerBase
         ILogger<GeminiController> logger)
     {
         _multiProviderService = multiProviderService;
-        _providerFactory = providerFactory;
         _logger = logger;
     }
 
@@ -67,7 +65,8 @@ public class GeminiController : ControllerBase
             }
 
             var httpRequest = HttpContext.Request;
-            var proxyKey = HttpContext.Request.Headers["x-goog-api-key"].FirstOrDefault();
+            var proxyKey = HttpContext.Request.Headers["x-goog-api-key"].FirstOrDefault()
+                          ?? HttpContext.Request.Query["key"].FirstOrDefault();
             if (string.IsNullOrEmpty(proxyKey))
             {
                 return BadRequest(new ApiErrorResponse
@@ -84,6 +83,8 @@ public class GeminiController : ControllerBase
 
             _logger.LogDebug("接收到Gemini生成内容请求 - Model: {Model}, ProxyKey: {ProxyKey}，原始请求：{RawRequest}",
                 model, string.IsNullOrEmpty(proxyKey) ? "无" : "已提供", rawJsonBody);
+
+            request.Model = model;
 
             // 使用Gemini专用HTTP代理
             var httpResponse = await _multiProviderService.ProcessGeminiHttpRequestAsync(
@@ -191,7 +192,8 @@ public class GeminiController : ControllerBase
             }
 
             var httpRequest = HttpContext.Request;
-            var proxyKey = HttpContext.Request.Headers["x-goog-api-key"].FirstOrDefault();
+            var proxyKey = HttpContext.Request.Headers["x-goog-api-key"].FirstOrDefault()
+                          ?? HttpContext.Request.Query["key"].FirstOrDefault();
             if (string.IsNullOrEmpty(proxyKey))
             {
                 return BadRequest(new ApiErrorResponse
@@ -274,7 +276,8 @@ public class GeminiController : ControllerBase
     {
         try
         {
-            var proxyKey = HttpContext.Request.Headers["x-goog-api-key"].FirstOrDefault();
+            var proxyKey = HttpContext.Request.Headers["x-goog-api-key"].FirstOrDefault()
+                          ?? HttpContext.Request.Query["key"].FirstOrDefault();
             if (string.IsNullOrEmpty(proxyKey))
             {
                 return BadRequest(new ApiErrorResponse
@@ -287,10 +290,23 @@ public class GeminiController : ControllerBase
                 });
             }
 
-            _logger.LogDebug("获取Gemini模型列表 - ProxyKey: {ProxyKey}", string.IsNullOrEmpty(proxyKey) ? "无" : "已提供");
+            var userAgent = HttpContext.Request.Headers.UserAgent.FirstOrDefault() ?? "";
+            var isOkHttpClient = userAgent.Contains("okhttp", StringComparison.OrdinalIgnoreCase);
+
+            _logger.LogDebug("获取Gemini模型列表 - ProxyKey: {ProxyKey}, UserAgent: {UserAgent}, IsOkHttp: {IsOkHttp}",
+                string.IsNullOrEmpty(proxyKey) ? "无" : "已提供", userAgent, isOkHttpClient);
 
             // 使用新的 GetGeminiAvailableModelsAsync 方法，自动去除 models/ 前缀
             var response = await _multiProviderService.GetGeminiAvailableModelsAsync(proxyKey, _providerType);
+
+            // 如果是 okhttp 客户端，需要为模型名称添加 models/ 前缀
+            if (isOkHttpClient && response.Models != null)
+            {
+                foreach (var model in response.Models)
+                {
+                    model.SupportedGenerationMethods = ["generateContent", "countTokens"];
+                }
+            }
 
             _logger.LogDebug("返回 {ModelCount} 个Gemini模型", response.Models?.Count ?? 0);
 

@@ -21,17 +21,20 @@ public class AdminController : ControllerBase
 {
     private readonly IKeyManager _keyManager;
     private readonly IRequestLogger _requestLogger;
+    private readonly ISqlSugarClient _db;
     private readonly ILogger<AdminController> _logger;
     private readonly IVersionService _versionService;
 
     public AdminController(
-        IKeyManager keyManager, 
-        IRequestLogger requestLogger, 
+        IKeyManager keyManager,
+        IRequestLogger requestLogger,
+        ISqlSugarClient db,
         ILogger<AdminController> logger,
         IVersionService versionService)
     {
         _keyManager = keyManager;
         _requestLogger = requestLogger;
+        _db = db;
         _logger = logger;
         _versionService = versionService;
     }
@@ -107,15 +110,7 @@ public class AdminController : ControllerBase
         }
     }
 
-    /// <summary>
-    /// 删除分组
-    /// </summary>
-    [HttpDelete("groups/{id}")]
-    public async Task<IActionResult> DeleteGroup(string id)
-    {
-        await _keyManager.DeleteGroupAsync(id);
-        return NoContent();
-    }
+
 
     /// <summary>
     /// 切换分组启用状态
@@ -998,7 +993,7 @@ public class AdminController : ControllerBase
 
             // 使用与后台服务相同的方法进行健康检查和恢复
             var result = await _keyManager.CheckAndRecoverInvalidKeysAsync();
-            
+
             if (result is Dictionary<string, object> resultDict)
             {
                 var success = resultDict.GetValueOrDefault("success", false);
@@ -1008,11 +1003,11 @@ public class AdminController : ControllerBase
                     var checkedGroups = resultDict.GetValueOrDefault("checked_groups", 0);
                     var message = resultDict.GetValueOrDefault("message", "健康检查完成");
 
-                    return Ok(new 
-                    { 
-                        success = true, 
-                        message = "健康检查刷新成功", 
-                        data = new 
+                    return Ok(new
+                    {
+                        success = true,
+                        message = "健康检查刷新成功",
+                        data = new
                         {
                             checked_groups = checkedGroups,
                             recovered_keys = recoveredKeys,
@@ -1027,7 +1022,7 @@ public class AdminController : ControllerBase
                     return BadRequest(new { success = false, error = error.ToString() });
                 }
             }
-            
+
             return Ok(new { success = true, message = "健康检查刷新完成", data = result });
         }
         catch (Exception ex)
@@ -1055,7 +1050,7 @@ public class AdminController : ControllerBase
     }
 
     /// <summary>
-    /// 获取模型列表
+    /// 获取模型列表，按服务商分组并按创建时间倒序排序
     /// </summary>
     [HttpGet("models")]
     public async Task<IActionResult> GetModels([FromQuery] string? provider = null)
@@ -1063,9 +1058,22 @@ public class AdminController : ControllerBase
         try
         {
             var groups = await _keyManager.GetAllGroupsAsync();
+
+            // 按分组ID作为键，返回前端期望的数据格式
             var result = new Dictionary<string, object>();
 
-            foreach (var group in groups.Where(g => g.Enabled))
+            // 按创建时间倒序排序所有分组
+            var sortedGroups = groups.Where(g => g.Enabled)
+                .OrderByDescending(g => g.CreatedAt)
+                .ToList();
+
+            // 如果指定了provider参数，只返回该provider的分组
+            if (!string.IsNullOrEmpty(provider))
+            {
+                sortedGroups = sortedGroups.Where(g => string.Equals(g.ProviderType, provider, StringComparison.OrdinalIgnoreCase)).ToList();
+            }
+
+            foreach (var group in sortedGroups)
             {
                 // 解析分组的模型列表和别名映射
                 var groupModels = new List<object>();
@@ -1102,7 +1110,10 @@ public class AdminController : ControllerBase
                                 id = model,
                                 @object = "model",
                                 owned_by = GetOwnerByProviderType(group.ProviderType),
-                                alias_name = aliasForThisModel // 如果有别名就显示别名，没有就是null
+                                alias_name = aliasForThisModel, // 如果有别名就显示别名，没有就是null
+                                group_id = group.Id,
+                                group_name = group.GroupName,
+                                created_at = group.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss")
                             });
                         }
                     }
@@ -1116,7 +1127,10 @@ public class AdminController : ControllerBase
                                 id = group.Models,
                                 @object = "model",
                                 owned_by = GetOwnerByProviderType(group.ProviderType),
-                                alias_name = (string?)null
+                                alias_name = (string?)null,
+                                group_id = group.Id,
+                                group_name = group.GroupName,
+                                created_at = group.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss")
                             }
                         };
                     }
@@ -1132,27 +1146,33 @@ public class AdminController : ControllerBase
                             id = alias.Value, // 显示原始模型名
                             @object = "model",
                             owned_by = GetOwnerByProviderType(group.ProviderType),
-                            alias_name = alias.Key // 别名
+                            alias_name = alias.Key, // 别名
+                            group_id = group.Id,
+                            group_name = group.GroupName,
+                            created_at = group.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss")
                         });
                     }
                 }
 
+                // 使用分组ID作为键，返回前端期望的格式
                 result[group.Id] = new
                 {
                     group_name = group.GroupName,
+                    provider_type = group.ProviderType,
+                    created_at = group.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss"),
                     models = new
                     {
                         data = groupModels,
                         @object = "list"
-                    },
-                    provider_type = group.ProviderType
+                    }
                 };
             }
 
             return Ok(new
             {
                 data = result,
-                @object = "list"
+                @object = "list",
+                total_groups = result.Count
             });
         }
         catch (Exception ex)
@@ -1172,6 +1192,20 @@ public class AdminController : ControllerBase
             "anthropic" => "anthropic",
             "gemini" => "google",
             _ => providerType.ToLower()
+        };
+    }
+
+    /// <summary>
+    /// 根据服务商类型获取显示名称
+    /// </summary>
+    private string GetProviderDisplayName(string providerType)
+    {
+        return providerType.ToLower() switch
+        {
+            "openai" => "OpenAI",
+            "anthropic" => "Anthropic Claude",
+            "gemini" => "Google Gemini",
+            _ => providerType
         };
     }
 
@@ -1518,6 +1552,284 @@ public class AdminController : ControllerBase
     }
 
     /// <summary>
+    /// 删除服务商分组（级联删除相关的健康检查记录）
+    /// </summary>
+    [HttpDelete("groups/{groupId}")]
+    public async Task<IActionResult> DeleteGroup(string groupId)
+    {
+        try
+        {
+            _logger.LogInformation("管理员请求删除分组: {GroupId}", groupId);
+
+            // 检查分组是否存在
+            var group = await _db.Queryable<GroupConfig>()
+                .Where(g => g.Id == groupId && !g.IsDeleted)
+                .FirstAsync();
+            if (group == null)
+            {
+                return NotFound(new { success = false, error = "分组不存在" });
+            }
+
+            // 删除分组（软删除）
+            await _keyManager.DeleteGroupAsync(groupId);
+
+            // 级联删除相关的健康检查记录
+            await DeleteHealthCheckRecordsByGroupId(groupId);
+
+            _logger.LogInformation("成功删除分组及相关健康检查记录: {GroupId}", groupId);
+            return Ok(new
+            {
+                success = true,
+                message = "分组删除成功",
+                group_id = groupId,
+                operation_time = DateTime.Now
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "删除分组时发生异常: {GroupId}", groupId);
+            return StatusCode(500, new
+            {
+                success = false,
+                error = ex.Message,
+                operation_time = DateTime.Now
+            });
+        }
+    }
+
+    /// <summary>
+    /// 从分组中删除指定的API密钥（级联删除相关的健康检查记录）
+    /// </summary>
+    [HttpDelete("groups/{groupId}/keys")]
+    public async Task<IActionResult> DeleteApiKeyFromGroup(string groupId, [FromBody] DeleteApiKeyRequest request)
+    {
+        try
+        {
+            _logger.LogInformation("管理员请求从分组 {GroupId} 中删除API密钥", groupId);
+
+            var group = await _db.Queryable<GroupConfig>()
+                .Where(g => g.Id == groupId && !g.IsDeleted)
+                .FirstAsync();
+            if (group == null)
+            {
+                return NotFound(new { success = false, error = "分组不存在" });
+            }
+
+            // 解析现有的API密钥
+            var apiKeys = JsonConvert.DeserializeObject<List<string>>(group.ApiKeys) ?? new List<string>();
+            var keyToRemove = apiKeys.FirstOrDefault(k => k == request.ApiKey);
+
+            if (keyToRemove == null)
+            {
+                return NotFound(new { success = false, error = "指定的API密钥不存在于该分组中" });
+            }
+
+            // 从列表中移除密钥
+            apiKeys.Remove(keyToRemove);
+            group.ApiKeys = JsonConvert.SerializeObject(apiKeys);
+            group.UpdatedAt = DateTime.Now;
+
+            // 更新分组配置
+            await _db.Updateable(group).ExecuteCommandAsync();
+
+            // 级联删除相关的健康检查记录
+            var keyHash = ComputeKeyHash(keyToRemove);
+            await DeleteHealthCheckRecordsByApiKey(groupId, keyHash);
+
+            _logger.LogInformation("成功从分组 {GroupId} 中删除API密钥及相关健康检查记录", groupId);
+            return Ok(new
+            {
+                success = true,
+                message = "API密钥删除成功",
+                group_id = groupId,
+                remaining_keys = apiKeys.Count,
+                operation_time = DateTime.Now
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "删除API密钥时发生异常: {GroupId}", groupId);
+            return StatusCode(500, new
+            {
+                success = false,
+                error = ex.Message,
+                operation_time = DateTime.Now
+            });
+        }
+    }
+
+    /// <summary>
+    /// 从分组中删除指定的模型（级联删除相关的健康检查记录）
+    /// </summary>
+    [HttpDelete("groups/{groupId}/models")]
+    public async Task<IActionResult> DeleteModelFromGroup(string groupId, [FromBody] DeleteModelRequest request)
+    {
+        try
+        {
+            _logger.LogInformation("管理员请求从分组 {GroupId} 中删除模型: {ModelId}", groupId, request.ModelId);
+
+            var group = await _db.Queryable<GroupConfig>()
+                .Where(g => g.Id == groupId && !g.IsDeleted)
+                .FirstAsync();
+            if (group == null)
+            {
+                return NotFound(new { success = false, error = "分组不存在" });
+            }
+
+            // 解析现有的模型列表
+            var models = JsonConvert.DeserializeObject<List<string>>(group.Models) ?? new List<string>();
+            var modelToRemove = models.FirstOrDefault(m => m == request.ModelId);
+
+            if (modelToRemove == null)
+            {
+                return NotFound(new { success = false, error = "指定的模型不存在于该分组中" });
+            }
+
+            // 从列表中移除模型
+            models.Remove(modelToRemove);
+            group.Models = JsonConvert.SerializeObject(models);
+
+            // 同时从模型别名映射中移除（如果存在）
+            if (!string.IsNullOrEmpty(group.ModelAliases))
+            {
+                try
+                {
+                    var aliases = JsonConvert.DeserializeObject<Dictionary<string, string>>(group.ModelAliases) ?? new Dictionary<string, string>();
+
+                    // 移除以该模型为值的别名映射
+                    var aliasesToRemove = aliases.Where(kv => kv.Value == request.ModelId).Select(kv => kv.Key).ToList();
+                    foreach (var alias in aliasesToRemove)
+                    {
+                        aliases.Remove(alias);
+                    }
+
+                    // 移除以该模型为键的别名映射
+                    if (aliases.ContainsKey(request.ModelId))
+                    {
+                        aliases.Remove(request.ModelId);
+                    }
+
+                    group.ModelAliases = JsonConvert.SerializeObject(aliases);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "更新模型别名映射时发生异常，继续执行删除操作");
+                }
+            }
+
+            group.UpdatedAt = DateTime.Now;
+
+            // 更新分组配置
+            await _db.Updateable(group).ExecuteCommandAsync();
+
+            // 级联删除相关的健康检查记录
+            await DeleteHealthCheckRecordsByModel(groupId, request.ModelId);
+
+            _logger.LogInformation("成功从分组 {GroupId} 中删除模型 {ModelId} 及相关健康检查记录", groupId, request.ModelId);
+            return Ok(new
+            {
+                success = true,
+                message = "模型删除成功",
+                group_id = groupId,
+                model_id = request.ModelId,
+                remaining_models = models.Count,
+                operation_time = DateTime.Now
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "删除模型时发生异常: {GroupId}, {ModelId}", groupId, request.ModelId);
+            return StatusCode(500, new
+            {
+                success = false,
+                error = ex.Message,
+                operation_time = DateTime.Now
+            });
+        }
+    }
+
+    #region 健康检查记录删除辅助方法
+
+    /// <summary>
+    /// 删除指定分组的所有健康检查记录
+    /// </summary>
+    private async Task DeleteHealthCheckRecordsByGroupId(string groupId)
+    {
+        try
+        {
+            using var scope = HttpContext.RequestServices.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<ISqlSugarClient>();
+
+            // 删除健康检查结果记录
+            var deletedResults = await db.Deleteable<HealthCheckResult>()
+                .Where(r => r.GroupId == groupId)
+                .ExecuteCommandAsync();
+
+            // 删除健康检查统计记录
+            var deletedStats = await db.Deleteable<HealthCheckStats>()
+                .Where(s => s.GroupId == groupId)
+                .ExecuteCommandAsync();
+
+            _logger.LogInformation("删除分组 {GroupId} 的健康检查记录: 结果记录 {ResultCount} 条，统计记录 {StatsCount} 条",
+                groupId, deletedResults, deletedStats);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "删除分组 {GroupId} 的健康检查记录时发生异常", groupId);
+        }
+    }
+
+    /// <summary>
+    /// 删除指定API密钥的健康检查记录
+    /// </summary>
+    private async Task DeleteHealthCheckRecordsByApiKey(string groupId, string apiKeyHash)
+    {
+        try
+        {
+            using var scope = HttpContext.RequestServices.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<ISqlSugarClient>();
+
+            // 删除该密钥相关的健康检查结果记录
+            var deletedResults = await db.Deleteable<HealthCheckResult>()
+                .Where(r => r.GroupId == groupId && r.ApiKeyHash == apiKeyHash)
+                .ExecuteCommandAsync();
+
+            _logger.LogInformation("删除分组 {GroupId} 中API密钥 {KeyHash} 的健康检查记录: {Count} 条",
+                groupId, apiKeyHash.Substring(0, Math.Min(8, apiKeyHash.Length)), deletedResults);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "删除API密钥健康检查记录时发生异常: {GroupId}, {KeyHash}", groupId, apiKeyHash);
+        }
+    }
+
+    /// <summary>
+    /// 删除指定模型的健康检查记录
+    /// </summary>
+    private async Task DeleteHealthCheckRecordsByModel(string groupId, string modelId)
+    {
+        try
+        {
+            using var scope = HttpContext.RequestServices.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<ISqlSugarClient>();
+
+            // 删除该模型相关的健康检查结果记录
+            var deletedResults = await db.Deleteable<HealthCheckResult>()
+                .Where(r => r.GroupId == groupId && r.ModelId == modelId)
+                .ExecuteCommandAsync();
+
+            _logger.LogInformation("删除分组 {GroupId} 中模型 {ModelId} 的健康检查记录: {Count} 条",
+                groupId, modelId, deletedResults);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "删除模型健康检查记录时发生异常: {GroupId}, {ModelId}", groupId, modelId);
+        }
+    }
+
+    #endregion
+
+    /// <summary>
     /// 计算密钥哈希值
     /// </summary>
     private static string ComputeKeyHash(string apiKey)
@@ -1526,4 +1838,26 @@ public class AdminController : ControllerBase
         var hashBytes = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(apiKey));
         return Convert.ToHexString(hashBytes);
     }
+}
+
+/// <summary>
+/// 删除API密钥请求
+/// </summary>
+public class DeleteApiKeyRequest
+{
+    /// <summary>
+    /// 要删除的API密钥
+    /// </summary>
+    public string ApiKey { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// 删除模型请求
+/// </summary>
+public class DeleteModelRequest
+{
+    /// <summary>
+    /// 要删除的模型ID
+    /// </summary>
+    public string ModelId { get; set; } = string.Empty;
 }

@@ -51,7 +51,88 @@ public class ChatCompletionRequest
     public List<ChatTool>? Tools { get; set; }
 
     [JsonProperty("stream_options")]
-    public Dictionary<string, object>? StreamOptions { get; set; }
+    public ChatStreamOptions? StreamOptions { get; set; }
+
+    // 新增参数：多选择数量
+    [JsonProperty("n")]
+    public int? N { get; set; }
+
+    // 新增参数：函数调用控制
+    [JsonProperty("function_call")]
+    public object? FunctionCall { get; set; }
+
+    [JsonProperty("functions")]
+    public List<ChatFunction>? Functions { get; set; }
+
+    [JsonProperty("tool_choice")]
+    public object? ToolChoice { get; set; }
+
+    [JsonProperty("parallel_tool_calls")]
+    public bool? ParallelToolCalls { get; set; }
+
+    // 新增参数：响应格式控制
+    [JsonProperty("response_format")]
+    public object? ResponseFormat { get; set; }
+
+    // 新增参数：随机种子
+    [JsonProperty("seed")]
+    public int? Seed { get; set; }
+
+    // 新增参数：服务等级
+    [JsonProperty("service_tier")]
+    public string? ServiceTier { get; set; }
+
+    // GPT-5/GPT-4o 新增参数
+    [JsonProperty("verbosity")]
+    public string? Verbosity { get; set; }
+
+    [JsonProperty("minimal_reasoning")]
+    public bool? MinimalReasoning { get; set; }
+
+    [JsonProperty("allowed_tools")]
+    public List<string>? AllowedTools { get; set; }
+
+    [JsonProperty("reasoning_effort")]
+    public string? ReasoningEffort { get; set; }
+
+    // 扩展参数支持
+    [JsonProperty("metadata")]
+    public Dictionary<string, object>? Metadata { get; set; }
+
+    [JsonProperty("store")]
+    public bool? Store { get; set; }
+
+    // 重要缺失参数补充
+    [JsonProperty("top_logprobs")]
+    public int? TopLogprobs { get; set; }
+
+    [JsonProperty("logprobs")]
+    public bool? Logprobs { get; set; }
+
+    [JsonProperty("max_completion_tokens")]
+    public int? MaxCompletionTokens { get; set; }
+
+    [JsonProperty("modalities")]
+    public List<string>? Modalities { get; set; }
+
+    [JsonProperty("audio")]
+    public object? Audio { get; set; }
+
+    [JsonProperty("prediction")]
+    public object? Prediction { get; set; }
+
+    // 开发者消息角色支持
+    [JsonProperty("developer_message")]
+    public string? DeveloperMessage { get; set; }
+}
+
+/// <summary>
+/// Chat流式选项配置
+/// </summary>
+public class ChatStreamOptions
+{
+    [JsonProperty("include_usage")]
+    public bool? IncludeUsage { get; set; }
 }
 
 /// <summary>
@@ -233,6 +314,36 @@ public class ApiError
 }
 
 #endregion Error Models
+
+#region Response Models
+
+/// <summary>
+/// 通用API响应包装类
+/// </summary>
+/// <typeparam name="T">响应数据类型</typeparam>
+public class ApiResponse<T>
+{
+    [JsonProperty("success")]
+    public bool Success { get; set; }
+
+    [JsonProperty("data")]
+    public T? Data { get; set; }
+
+    [JsonProperty("message")]
+    public string? Message { get; set; }
+
+    [JsonProperty("error")]
+    public string? Error { get; set; }
+}
+
+/// <summary>
+/// 无数据的API响应
+/// </summary>
+public class ApiResponse : ApiResponse<object>
+{
+}
+
+#endregion Response Models
 
 #region Models API Models
 
@@ -424,6 +535,9 @@ public class GroupRequest
 
     [JsonProperty("enabled")]
     public bool Enabled { get; set; } = true;
+
+    [JsonProperty("fake_streaming")]
+    public bool FakeStreaming { get; set; } = false;
 
     [JsonProperty("proxy_enabled")]
     public bool ProxyEnabled { get; set; } = false;
@@ -1127,6 +1241,9 @@ public class GeminiNativeModelInfo
 
     [JsonProperty("maxTemperature")]
     public float? MaxTemperature { get; set; }
+
+    [JsonProperty("thinking")]
+    public bool? Thinking { get; set; }
 }
 
 /// <summary>
@@ -1394,6 +1511,312 @@ public class AnthropicStreamEvent
 }
 
 #endregion Anthropic Claude API Models
+
+#region Responses API Models
+
+/// <summary>
+/// Responses API 请求（支持多种输入格式和工具类型）
+/// </summary>
+public class ResponsesRequest
+{
+    [Required]
+    [JsonProperty("model")]
+    public string Model { get; set; } = string.Empty;
+
+    [Required]
+    [JsonProperty("input")]
+    [JsonConverter(typeof(ResponsesInputConverter))]
+    public object Input { get; set; } = string.Empty;
+
+    [JsonProperty("instructions")]
+    public string? Instructions { get; set; }
+
+    [JsonProperty("tools")]
+    public List<ResponsesTool>? Tools { get; set; }
+
+    [JsonProperty("tool_choice")]
+    public string? ToolChoice { get; set; }
+
+    [JsonProperty("reasoning")]
+    public ResponsesReasoningConfig? Reasoning { get; set; }
+
+    [JsonProperty("stream")]
+    public bool Stream { get; set; } = false;
+
+    [JsonProperty("temperature")]
+    public float? Temperature { get; set; }
+
+    [JsonProperty("top_p")]
+    public float? TopP { get; set; }
+
+    [JsonProperty("max_tokens")]
+    public int? MaxTokens { get; set; }
+
+    [JsonProperty("stop")]
+    public object? Stop { get; set; }
+
+    // 新增：支持响应链式调用
+    [JsonProperty("previous_response_id")]
+    public string? PreviousResponseId { get; set; }
+
+    // 新增：后台任务支持
+    [JsonProperty("background")]
+    public bool Background { get; set; } = false;
+
+    // 新增：存储设置
+    [JsonProperty("store")]
+    public bool Store { get; set; } = true;
+
+    // 新增：并行工具调用
+    [JsonProperty("parallel_tool_calls")]
+    public bool? ParallelToolCalls { get; set; }
+
+    // 新增：包含字段配置
+    [JsonProperty("include")]
+    public List<string>? Include { get; set; }
+
+    // 新增：元数据
+    [JsonProperty("metadata")]
+    public Dictionary<string, object>? Metadata { get; set; }
+
+    // 新增：推理努力配置
+    [JsonProperty("reasoning_effort")]
+    public string? ReasoningEffort { get; set; }
+
+    // 新增：截断配置
+    [JsonProperty("truncation")]
+    public ResponsesTruncationConfig? Truncation { get; set; }
+}
+
+/// <summary>
+/// Responses API 工具定义
+/// </summary>
+public class ResponsesTool
+{
+    [Required]
+    [JsonProperty("type")]
+    public string Type { get; set; } = string.Empty;
+
+    [JsonProperty("name")]
+    public string? Name { get; set; }
+
+    [JsonProperty("description")]
+    public string? Description { get; set; }
+
+    [JsonProperty("parameters")]
+    public object? Parameters { get; set; }
+
+    // File Search Tool 配置
+    [JsonProperty("vector_store_ids")]
+    public List<string>? VectorStoreIds { get; set; }
+
+    [JsonProperty("max_num_results")]
+    public int? MaxNumResults { get; set; }
+
+    // Code Interpreter Tool 配置
+    [JsonProperty("container")]
+    public ResponsesCodeContainer? Container { get; set; }
+
+    // Image Generation Tool 配置
+    [JsonProperty("partial_images")]
+    public int? PartialImages { get; set; }
+
+    // MCP Tool 配置
+    [JsonProperty("server_label")]
+    public string? ServerLabel { get; set; }
+
+    [JsonProperty("server_url")]
+    public string? ServerUrl { get; set; }
+
+    [JsonProperty("headers")]
+    public Dictionary<string, string>? Headers { get; set; }
+
+    [JsonProperty("require_approval")]
+    public string? RequireApproval { get; set; }
+}
+
+/// <summary>
+/// Code Interpreter 容器配置
+/// </summary>
+public class ResponsesCodeContainer
+{
+    [JsonProperty("type")]
+    public string Type { get; set; } = "auto";
+
+    [JsonProperty("files")]
+    public List<string>? Files { get; set; }
+}
+
+/// <summary>
+/// Responses API 推理配置
+/// </summary>
+public class ResponsesReasoningConfig
+{
+    [JsonProperty("effort")]
+    public string? Effort { get; set; }
+}
+
+/// <summary>
+/// Responses API 截断配置
+/// </summary>
+public class ResponsesTruncationConfig
+{
+    [JsonProperty("type")]
+    public string? Type { get; set; }
+
+    [JsonProperty("last_messages")]
+    public int? LastMessages { get; set; }
+}
+
+/// <summary>
+/// Responses API 输入内容项
+/// </summary>
+public class ResponsesInputContent
+{
+    [Required]
+    [JsonProperty("type")]
+    public string Type { get; set; } = string.Empty;
+
+    [JsonProperty("text")]
+    public string? Text { get; set; }
+
+    [JsonProperty("image_url")]
+    public string? ImageUrl { get; set; }
+
+    [JsonProperty("file_url")]
+    public string? FileUrl { get; set; }
+}
+
+/// <summary>
+/// Responses API 输入消息
+/// </summary>
+public class ResponsesInputMessage
+{
+    [Required]
+    [JsonProperty("role")]
+    public string Role { get; set; } = string.Empty;
+
+    [Required]
+    [JsonProperty("content")]
+    public List<ResponsesInputContent> Content { get; set; } = new();
+}
+
+/// <summary>
+/// Responses API 响应对象
+/// </summary>
+public class ResponsesApiResponse
+{
+    [JsonProperty("id")]
+    public string Id { get; set; } = string.Empty;
+
+    [JsonProperty("object")]
+    public string Object { get; set; } = "response";
+
+    [JsonProperty("created_at")]
+    public long CreatedAt { get; set; }
+
+    [JsonProperty("model")]
+    public string Model { get; set; } = string.Empty;
+
+    [JsonProperty("status")]
+    public string Status { get; set; } = "completed";
+
+    [JsonProperty("output")]
+    public List<object>? Output { get; set; }
+
+    [JsonProperty("output_text")]
+    public string? OutputText { get; set; }
+
+    [JsonProperty("usage")]
+    public ResponsesUsage? Usage { get; set; }
+
+    [JsonProperty("metadata")]
+    public Dictionary<string, object>? Metadata { get; set; }
+
+    [JsonProperty("previous_response_id")]
+    public string? PreviousResponseId { get; set; }
+
+    [JsonProperty("reasoning")]
+    public object? Reasoning { get; set; }
+
+    [JsonProperty("error")]
+    public object? Error { get; set; }
+
+    [JsonProperty("incomplete_details")]
+    public object? IncompleteDetails { get; set; }
+}
+
+/// <summary>
+/// Responses API 使用统计
+/// </summary>
+public class ResponsesUsage
+{
+    [JsonProperty("input_tokens")]
+    public int InputTokens { get; set; }
+
+    [JsonProperty("output_tokens")]
+    public int OutputTokens { get; set; }
+
+    [JsonProperty("total_tokens")]
+    public int TotalTokens { get; set; }
+
+    [JsonProperty("output_tokens_details")]
+    public ResponsesTokenDetails? OutputTokensDetails { get; set; }
+}
+
+/// <summary>
+/// Token详情
+/// </summary>
+public class ResponsesTokenDetails
+{
+    [JsonProperty("reasoning_tokens")]
+    public int ReasoningTokens { get; set; }
+}
+
+#endregion Responses API Models
+
+/// <summary>
+/// Newtonsoft.Json 转换器：支持 Responses API 输入格式
+/// - 字符串 => 基础文本请求
+/// - 数组   => 消息格式（包含图像、文件等内容）
+/// </summary>
+public sealed class ResponsesInputConverter : JsonConverter
+{
+    public override bool CanConvert(Type objectType)
+    {
+        return objectType == typeof(object);
+    }
+
+    public override object? ReadJson(JsonReader reader, Type objectType, object? existingValue, JsonSerializer serializer)
+    {
+        var token = JToken.Load(reader);
+
+        // null/undefined -> empty string
+        if (token.Type == JTokenType.Null || token.Type == JTokenType.Undefined)
+        {
+            return string.Empty;
+        }
+
+        // string -> basic text request
+        if (token.Type == JTokenType.String)
+        {
+            return token.ToString();
+        }
+
+        // array -> message format with content
+        if (token.Type == JTokenType.Array)
+        {
+            return token.ToObject<List<ResponsesInputMessage>>(serializer) ?? new List<ResponsesInputMessage>();
+        }
+
+        throw new JsonSerializationException($"Unsupported input token type: {token.Type}");
+    }
+
+    public override void WriteJson(JsonWriter writer, object? value, JsonSerializer serializer)
+    {
+        serializer.Serialize(writer, value);
+    }
+}
 
 /// <summary>
 /// Newtonsoft.Json 转换器：支持 Anthropic 消息 content 接受字符串或数组

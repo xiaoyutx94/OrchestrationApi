@@ -73,6 +73,8 @@ public class DatabaseConfiguration
         client.CodeFirst.As<RequestLog>($"{tablePrefix}request_logs");
         client.CodeFirst.As<User>($"{tablePrefix}users");
         client.CodeFirst.As<UserSession>($"{tablePrefix}sessions");
+        client.CodeFirst.As<HealthCheckResult>($"{tablePrefix}health_check_results");
+        client.CodeFirst.As<HealthCheckStats>($"{tablePrefix}health_check_stats");
     }
 
     /// <summary>
@@ -234,6 +236,28 @@ public class DatabaseInitializer : IDatabaseInitializer
                 _logger.LogWarning(ex, "KeyUsageStats表创建失败，尝试跳过");
             }
 
+            try
+            {
+                // 尝试手动创建HealthCheckResult表
+                await CreateHealthCheckResultTableManually();
+                _logger.LogDebug("HealthCheckResult表创建成功");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "HealthCheckResult表创建失败，尝试跳过");
+            }
+
+            try
+            {
+                // 尝试手动创建HealthCheckStats表
+                await CreateHealthCheckStatsTableManually();
+                _logger.LogDebug("HealthCheckStats表创建成功");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "HealthCheckStats表创建失败，尝试跳过");
+            }
+
             // 执行数据库增量更新
             await ExecuteDatabaseMigrations(currentVersion);
 
@@ -369,6 +393,7 @@ public class DatabaseInitializer : IDatabaseInitializer
                     enabled INTEGER DEFAULT 1,
                     proxy_enabled INTEGER DEFAULT 0,
                     proxy_config TEXT,
+                    fake_streaming INTEGER DEFAULT 0,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     is_deleted INTEGER DEFAULT 0
@@ -393,6 +418,7 @@ public class DatabaseInitializer : IDatabaseInitializer
                     enabled TINYINT DEFAULT 1,
                     proxy_enabled TINYINT DEFAULT 0,
                     proxy_config TEXT,
+                    fake_streaming TINYINT DEFAULT 0,
                     created_at DATETIME NOT NULL,
                     updated_at DATETIME NOT NULL,
                     is_deleted TINYINT DEFAULT 0
@@ -655,7 +681,7 @@ public class DatabaseInitializer : IDatabaseInitializer
     /// <summary>
     /// 当前数据库版本
     /// </summary>
-    private const string CURRENT_DATABASE_VERSION = "1.4.0";
+    private const string CURRENT_DATABASE_VERSION = "1.6.0";
 
     /// <summary>
     /// 初始化数据库版本管理表
@@ -893,12 +919,30 @@ public class DatabaseInitializer : IDatabaseInitializer
                 {
                     await initializer.AddProxyConfigToGroupConfig();
                 }
+            },
+            new DatabaseMigration
+            {
+                Version = "1.5.0",
+                Description = "添加 GroupConfig 表的假流模式字段 (fake_streaming)",
+                ExecuteAsync = async (db, logger, initializer) =>
+                {
+                    await initializer.AddFakeStreamingToGroupConfig();
+                }
+            },
+            new DatabaseMigration
+            {
+                Version = "1.6.0",
+                Description = "添加 HealthCheckResult 表的API密钥掩码字段 (api_key_masked)",
+                ExecuteAsync = async (db, logger, initializer) =>
+                {
+                    await initializer.AddApiKeyMaskedToHealthCheckResult();
+                }
             }
-            
+
             // 添加新迁移的示例：
             // new DatabaseMigration
             // {
-            //     Version = "1.3.0",
+            //     Version = "1.7.0",
             //     Description = "添加新表或字段的描述",
             //     ExecuteAsync = async (db, logger, initializer) =>
             //     {
@@ -1040,6 +1084,309 @@ public class DatabaseInitializer : IDatabaseInitializer
         else
         {
             _logger.LogDebug("字段 {TableName}.{ColumnName} 已存在，跳过添加", tableName, proxyConfigColumn);
+        }
+    }
+
+    /// <summary>
+    /// 添加假流模式字段到 GroupConfig 表
+    /// </summary>
+    private async Task AddFakeStreamingToGroupConfig()
+    {
+        var tableName = $"{_tablePrefix}groups";
+        const string columnName = "fake_streaming";
+        
+        if (await TableExists(tableName) && !await ColumnExists(tableName, columnName))
+        {
+            var dbType = _db.CurrentConnectionConfig.DbType;
+            
+            string alterSql = dbType switch
+            {
+                DbType.Sqlite => $"ALTER TABLE {tableName} ADD COLUMN {columnName} INTEGER DEFAULT 0",
+                DbType.MySql => $"ALTER TABLE {tableName} ADD COLUMN {columnName} TINYINT DEFAULT 0",
+                _ => throw new NotSupportedException($"不支持的数据库类型: {dbType}")
+            };
+
+            await _db.Ado.ExecuteCommandAsync(alterSql);
+            _logger.LogInformation("成功添加字段 {TableName}.{ColumnName}", tableName, columnName);
+        }
+        else
+        {
+            _logger.LogDebug("字段 {TableName}.{ColumnName} 已存在，跳过添加", tableName, columnName);
+        }
+    }
+
+    /// <summary>
+    /// 添加API密钥掩码字段到 HealthCheckResult 表
+    /// </summary>
+    private async Task AddApiKeyMaskedToHealthCheckResult()
+    {
+        var tableName = $"{_tablePrefix}health_check_results";
+        const string columnName = "api_key_masked";
+
+        if (await TableExists(tableName) && !await ColumnExists(tableName, columnName))
+        {
+            var dbType = _db.CurrentConnectionConfig.DbType;
+
+            string alterSql = dbType switch
+            {
+                DbType.Sqlite => $"ALTER TABLE {tableName} ADD COLUMN {columnName} TEXT",
+                DbType.MySql => $"ALTER TABLE {tableName} ADD COLUMN {columnName} VARCHAR(100)",
+                _ => throw new NotSupportedException($"不支持的数据库类型: {dbType}")
+            };
+
+            await _db.Ado.ExecuteCommandAsync(alterSql);
+            _logger.LogInformation("成功添加字段 {TableName}.{ColumnName}", tableName, columnName);
+        }
+        else
+        {
+            _logger.LogDebug("字段 {TableName}.{ColumnName} 已存在，跳过添加", tableName, columnName);
+        }
+    }
+
+    /// <summary>
+    /// 为现有的健康检查记录生成掩码版本
+    /// 通过当前配置的API密钥匹配哈希值来生成正确的掩码
+    /// </summary>
+    private async Task GenerateMaskedKeysForExistingRecords()
+    {
+        try
+        {
+            _logger.LogInformation("开始为现有健康检查记录生成掩码版本...");
+
+            // 获取所有当前配置的API密钥
+            var currentApiKeys = await GetAllCurrentApiKeys();
+            if (!currentApiKeys.Any())
+            {
+                _logger.LogWarning("未找到当前配置的API密钥，跳过掩码生成");
+                return;
+            }
+
+            // 为每个API密钥计算哈希值和掩码
+            var keyMappings = new Dictionary<string, string>(); // hash -> masked_key
+            foreach (var apiKey in currentApiKeys)
+            {
+                var hash = OrchestrationApi.Utils.ApiKeyMaskingUtils.ComputeKeyHash(apiKey);
+                var masked = OrchestrationApi.Utils.ApiKeyMaskingUtils.MaskApiKey(apiKey);
+                keyMappings[hash] = masked;
+            }
+
+            _logger.LogInformation("计算了 {Count} 个API密钥的哈希值和掩码", keyMappings.Count);
+
+            // 更新匹配的记录
+            var tableName = $"{_tablePrefix}health_check_results";
+            int totalUpdated = 0;
+
+            foreach (var mapping in keyMappings)
+            {
+                string updateSql = $@"
+                    UPDATE {tableName}
+                    SET api_key_masked = @maskedKey
+                    WHERE api_key_hash = @hash AND api_key_masked IS NULL";
+
+                var affectedRows = await _db.Ado.ExecuteCommandAsync(updateSql, new
+                {
+                    maskedKey = mapping.Value,
+                    hash = mapping.Key
+                });
+
+                if (affectedRows > 0)
+                {
+                    totalUpdated += affectedRows;
+                    _logger.LogDebug("为哈希 {Hash} 的 {Count} 条记录设置了掩码 {Masked}",
+                        mapping.Key.Substring(0, 8) + "...", affectedRows, mapping.Value);
+                }
+            }
+
+            // 为无法匹配的记录设置占位符（这些可能是已删除的API密钥）
+            string placeholderSql = $@"
+                UPDATE {tableName}
+                SET api_key_masked = 'sk-****************************'
+                WHERE api_key_hash IS NOT NULL AND api_key_masked IS NULL";
+
+            var placeholderRows = await _db.Ado.ExecuteCommandAsync(placeholderSql);
+
+            _logger.LogInformation("掩码生成完成: {Matched} 条记录匹配成功, {Placeholder} 条记录使用占位符",
+                totalUpdated, placeholderRows);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "为现有健康检查记录生成掩码版本时出错");
+        }
+    }
+
+    /// <summary>
+    /// 获取所有当前配置的API密钥
+    /// </summary>
+    private async Task<List<string>> GetAllCurrentApiKeys()
+    {
+        try
+        {
+            // 使用 SqlSugar 的 Queryable 方式查询
+            var apiKeysJsonList = await _db.Queryable<GroupConfig>()
+                .Where(g => g.Enabled)
+                .Select(g => g.ApiKeys)
+                .ToListAsync();
+            var allApiKeys = new List<string>();
+
+            foreach (var apiKeysJson in apiKeysJsonList)
+            {
+                if (string.IsNullOrEmpty(apiKeysJson)) continue;
+
+                try
+                {
+                    var keys = Newtonsoft.Json.JsonConvert.DeserializeObject<List<string>>(apiKeysJson);
+                    if (keys != null)
+                    {
+                        allApiKeys.AddRange(keys.Where(k => !string.IsNullOrEmpty(k)));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "解析API密钥JSON时出错: {Json}", apiKeysJson);
+                }
+            }
+
+            var uniqueKeys = allApiKeys.Distinct().ToList();
+            _logger.LogInformation("从 {GroupCount} 个分组中获取到 {KeyCount} 个唯一API密钥",
+                apiKeysJsonList.Count, uniqueKeys.Count);
+
+            return uniqueKeys;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "获取当前配置的API密钥时出错");
+            return [];
+        }
+    }
+
+    /// <summary>
+    /// 手动创建健康检查结果表
+    /// </summary>
+    private async Task CreateHealthCheckResultTableManually()
+    {
+        var dbType = _db.CurrentConnectionConfig.DbType;
+
+        string createSql = dbType switch
+        {
+            DbType.Sqlite => $@"
+                CREATE TABLE IF NOT EXISTS {_tablePrefix}health_check_results (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    group_id TEXT NOT NULL,
+                    api_key_hash TEXT,
+                    api_key_masked TEXT,
+                    model_id TEXT,
+                    check_type TEXT NOT NULL,
+                    status_code INTEGER NOT NULL,
+                    response_time_ms INTEGER NOT NULL,
+                    is_success INTEGER NOT NULL,
+                    error_message TEXT,
+                    checked_at TEXT NOT NULL,
+                    provider_type TEXT NOT NULL,
+                    base_url TEXT
+                )",
+            DbType.MySql => $@"
+                CREATE TABLE IF NOT EXISTS {_tablePrefix}health_check_results (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    group_id VARCHAR(100) NOT NULL,
+                    api_key_hash VARCHAR(64),
+                    api_key_masked VARCHAR(100),
+                    model_id VARCHAR(200),
+                    check_type VARCHAR(50) NOT NULL,
+                    status_code INT NOT NULL,
+                    response_time_ms INT NOT NULL,
+                    is_success TINYINT NOT NULL,
+                    error_message TEXT,
+                    checked_at DATETIME NOT NULL,
+                    provider_type VARCHAR(50) NOT NULL,
+                    base_url VARCHAR(500),
+                    INDEX idx_group_check_type (group_id, check_type),
+                    INDEX idx_checked_at (checked_at)
+                )",
+            _ => throw new NotSupportedException($"不支持的数据库类型: {dbType}")
+        };
+
+        await _db.Ado.ExecuteCommandAsync(createSql);
+
+        // 为SQLite创建索引
+        if (dbType == DbType.Sqlite)
+        {
+            try
+            {
+                await _db.Ado.ExecuteCommandAsync($@"
+                    CREATE INDEX IF NOT EXISTS idx_health_check_results_group_check_type
+                    ON {_tablePrefix}health_check_results(group_id, check_type)");
+                await _db.Ado.ExecuteCommandAsync($@"
+                    CREATE INDEX IF NOT EXISTS idx_health_check_results_checked_at
+                    ON {_tablePrefix}health_check_results(checked_at)");
+                _logger.LogDebug("HealthCheckResult索引创建成功");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "HealthCheckResult索引创建失败，可能已存在");
+            }
+        }
+    }
+
+    /// <summary>
+    /// 手动创建健康检查统计表
+    /// </summary>
+    private async Task CreateHealthCheckStatsTableManually()
+    {
+        var dbType = _db.CurrentConnectionConfig.DbType;
+
+        string createSql = dbType switch
+        {
+            DbType.Sqlite => $@"
+                CREATE TABLE IF NOT EXISTS {_tablePrefix}health_check_stats (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    group_id TEXT NOT NULL,
+                    check_type TEXT NOT NULL,
+                    total_checks INTEGER DEFAULT 0,
+                    successful_checks INTEGER DEFAULT 0,
+                    failed_checks INTEGER DEFAULT 0,
+                    avg_response_time_ms REAL DEFAULT 0,
+                    last_check_at TEXT,
+                    last_success_at TEXT,
+                    last_failure_at TEXT,
+                    consecutive_failures INTEGER DEFAULT 0,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(group_id, check_type)
+                )",
+            DbType.MySql => $@"
+                CREATE TABLE IF NOT EXISTS {_tablePrefix}health_check_stats (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    group_id VARCHAR(100) NOT NULL,
+                    check_type VARCHAR(50) NOT NULL,
+                    total_checks INT DEFAULT 0,
+                    successful_checks INT DEFAULT 0,
+                    failed_checks INT DEFAULT 0,
+                    avg_response_time_ms DOUBLE DEFAULT 0,
+                    last_check_at DATETIME,
+                    last_success_at DATETIME,
+                    last_failure_at DATETIME,
+                    consecutive_failures INT DEFAULT 0,
+                    updated_at DATETIME NOT NULL,
+                    UNIQUE KEY uk_group_check_type (group_id, check_type)
+                )",
+            _ => throw new NotSupportedException($"不支持的数据库类型: {dbType}")
+        };
+
+        await _db.Ado.ExecuteCommandAsync(createSql);
+
+        // 为SQLite创建索引
+        if (dbType == DbType.Sqlite)
+        {
+            try
+            {
+                await _db.Ado.ExecuteCommandAsync($@"
+                    CREATE INDEX IF NOT EXISTS idx_health_check_stats_group_check_type
+                    ON {_tablePrefix}health_check_stats(group_id, check_type)");
+                _logger.LogDebug("HealthCheckStats索引创建成功");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "HealthCheckStats索引创建失败，可能已存在");
+            }
         }
     }
 

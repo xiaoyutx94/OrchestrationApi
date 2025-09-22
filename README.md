@@ -14,8 +14,8 @@
 ## 🚀 核心特性（Claude帮我吹的，但意思差不多）
 
 ### 多服务商支持
-- **OpenAI**: 支持 GPT-3.5、GPT-4、GPT-4 Turbo 等全系列模型
-- **Anthropic Claude**: 支持 Claude 3 Haiku、Claude 3 Sonnet、Claude 3 Opus、Claude 3.5 Sonnet 等
+- **OpenAI**: 支持 GPT-3.5、GPT-4.1、GPT-5 等全系列模型
+- **Anthropic Claude**: 支持 Claude 3.5 Haiku、Claude 4 Sonnet、Claude 4 Opus等
 - **Google Gemini**: 支持 Gemini Pro、Gemini Flash、Gemini Vision 等模型
 - **透明代理模式**: 支持各服务商的原生 API 格式（OpenAI、Anthropic、Gemini）
 - **可扩展架构**: 通过接口驱动设计，轻松添加更多 AI 服务商
@@ -29,7 +29,8 @@
 
 ### 完全兼容多种 API 格式
 - **OpenAI 兼容**: 完全兼容 OpenAI API v1 格式，直接替换 base_url 即可使用
-- **Anthropic 原生**: 支持 Anthropic Claude 原生 API 格式（/v1/messages）
+- **OpenAI Responses**: 完全兼容 OpenAI API Responses 格式，直接替换 base_url 即可使用
+- **Anthropic 原生**: 支持 Anthropic Claude 原生 API 格式（claude/v1/messages）
 - **Gemini 原生**: 支持 Google Gemini 原生 API 格式（generateContent）
 - **流式响应**: 完整的 Server-Sent Events 支持，支持所有服务商的流式输出
 - **函数调用**: 完整的 Function Calling 和 Tools 支持
@@ -50,22 +51,6 @@
 - **Docker 原生支持**: 完整的容器化部署方案
 - **数据库支持**: 支持 SQLite（开发）和 MySQL（生产）
 - **配置热重载**: 支持动态配置更新
-
-## 🗓️ 版本历史
-
-### v1.0.1
-- ✅ 优化模型别名填写方式，支持选择系统中已经录入的别名
-- ✅ 增加系统版本检测功能，发布新版本后有升级提示
-- ✅ 精简无用代码逻辑和配置参数
-
-### v1.0.0 - 初始版本
-- ✅ .NET 9 框架
-- ✅ 全新的 Web 管理界面
-- ✅ 支持 OpenAI 兼容和支持 Gemini 原生API
-- ✅ 完善的 Docker 容器化部署
-- ✅ 增强的监控和日志功能
-- ✅ 智能密钥健康检查
-- ✅ 多重故障转移机制
 
 ## 📋 系统要求
 
@@ -100,7 +85,7 @@ docker-compose logs -f orchestration-api
 
 1. **克隆项目**
 ```bash
-git clone <repository-url>
+git clone https://github.com/xiaoyutx94/OrchestrationApi
 cd OrchestrationApi
 ```
 
@@ -146,26 +131,26 @@ dotnet watch run
 {
   "OrchestrationApi": {
     "Server": {
-      "Host": "0.0.0.0",
-      "Port": 5000,
-      "Mode": "release"
+      "Host": "0.0.0.0", //监听IP
+      "Port": 5000, //监听端口
+      "Mode": "release" //运行模式
     },
     "Auth": {
-      "Username": "admin",
-      "Password": "admin123",
-      "SessionTimeout": 86400,
+      "Username": "admin", //初始用户名
+      "Password": "admin123", //初始密码
+      "SessionTimeout": 86400, //登录超时
       "JwtSecret": "OrchestrationApi-SecretKey-2025-ChangeMeInProduction"
     },
     "Database": {
-      "Type": "sqlite",
-      "ConnectionString": "Data Source=Data/orchestration_api.db",
-      "MySqlConnectionString": "Server=localhost;Database=orchestration_api;Uid=root;Pwd=password;",
-      "TablePrefix": "orch_"
+      "Type": "sqlite", //数据库类型
+      "ConnectionString": "Data Source=Data/orchestration_api.db", //sqlite数据库链接
+      "MySqlConnectionString": "Server=localhost;Database=orchestration_api;Uid=root;Pwd=password;", //MySQL数据库链接 
+      "TablePrefix": "orch_" //表前缀
     },
     "Global": {
-      "ConnectionTimeout": 30,
-      "ResponseTimeout": 300,
-      "MaxProviderRetries": 3
+      "ConnectionTimeout": 30, //全局上游API请求超时
+      "ResponseTimeout": 300, //上游API响应超时
+      "MaxProviderRetries": 5 //服务商分组尝试次数
     },
     "Gemini": {
       "StreamingTimeout": 300,
@@ -181,8 +166,8 @@ dotnet watch run
       "RetentionDays": 30
     },
     "KeyHealthCheck": {
-      "IntervalMinutes": 5,
-      "Enabled": true
+      "IntervalMinutes": 5, //检查频率
+      "Enabled": true //启用无效key检查
     }
   }
 }
