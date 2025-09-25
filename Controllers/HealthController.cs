@@ -16,18 +16,21 @@ public class HealthController : ControllerBase
     private readonly ILogger<HealthController> _logger;
     private readonly IConfiguration _configuration;
     private readonly IVersionService _versionService;
+    private readonly IHealthCheckService _healthCheckService;
     private static readonly DateTime _startTime = DateTime.Now;
 
     public HealthController(
-        ISqlSugarClient db, 
-        ILogger<HealthController> logger, 
+        ISqlSugarClient db,
+        ILogger<HealthController> logger,
         IConfiguration configuration,
-        IVersionService versionService)
+        IVersionService versionService,
+        IHealthCheckService healthCheckService)
     {
         _db = db;
         _logger = logger;
         _configuration = configuration;
         _versionService = versionService;
+        _healthCheckService = healthCheckService;
     }
 
     /// <summary>
@@ -175,6 +178,74 @@ public class HealthController : ControllerBase
                 message = ex.Message,
                 current_version = _versionService.GetCurrentVersion()
             });
+        }
+    }
+
+    /// <summary>
+    /// 测试健康检查分析功能 (仅用于验证修复)
+    /// </summary>
+    [HttpGet("test-analysis/{groupId}")]
+    [ProducesResponseType(typeof(object), 200)]
+    public async Task<IActionResult> TestHealthCheckAnalysis(string groupId)
+    {
+        try
+        {
+            // 获取最近的健康检查结果
+            var recentResults = await _healthCheckService.GetRecentHealthCheckResultsAsync(groupId, null, 50);
+
+            if (!recentResults.Any())
+            {
+                return Ok(new
+                {
+                    success = true,
+                    message = "暂无健康检查数据",
+                    group_id = groupId
+                });
+            }
+
+            // 分析健康检查一致性
+            var analysis = _healthCheckService.AnalyzeHealthCheckConsistency(recentResults);
+
+            var result = new
+            {
+                success = true,
+                group_id = groupId,
+                analysis_time = DateTime.Now,
+
+                // 一致性分析结果
+                consistency_analysis = new
+                {
+                    provider_healthy = analysis.ProviderHealthy,
+                    keys_healthy = analysis.KeysHealthy,
+                    models_healthy = analysis.ModelsHealthy,
+                    is_inconsistent = analysis.IsInconsistent,
+                    inconsistency_reason = analysis.InconsistencyReason,
+                    overall_healthy = analysis.IsOverallHealthy,
+                    success_rate = Math.Round(analysis.SuccessRate, 2),
+                    status_summary = analysis.GetStatusSummary(),
+                    detailed_explanation = analysis.GetDetailedExplanation()
+                },
+
+                // 统计信息
+                statistics = new
+                {
+                    total_checks = analysis.TotalChecks,
+                    successful_checks = analysis.SuccessfulChecks,
+                    failed_checks = analysis.FailedChecks,
+                    data_period = new
+                    {
+                        from = recentResults.Min(r => r.CheckedAt),
+                        to = recentResults.Max(r => r.CheckedAt)
+                    }
+                }
+            };
+
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "测试健康检查分析时发生异常: {GroupId}", groupId);
+            return StatusCode(500, new { success = false, error = "分析失败", details = ex.Message });
         }
     }
 }

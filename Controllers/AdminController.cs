@@ -110,8 +110,6 @@ public class AdminController : ControllerBase
         }
     }
 
-
-
     /// <summary>
     /// 切换分组启用状态
     /// </summary>
@@ -911,7 +909,6 @@ public class AdminController : ControllerBase
         }
     }
 
-
     private async Task<object> GetSystemStatisticsAsync()
     {
         try
@@ -1600,8 +1597,8 @@ public class AdminController : ControllerBase
     /// <summary>
     /// 从分组中删除指定的API密钥（级联删除相关的健康检查记录）
     /// </summary>
-    [HttpDelete("groups/{groupId}/keys")]
-    public async Task<IActionResult> DeleteApiKeyFromGroup(string groupId, [FromBody] DeleteApiKeyRequest request)
+    [HttpDelete("groups/{groupId}/keys/{apiKey}")]
+    public async Task<IActionResult> DeleteApiKeyFromGroup(string groupId, string apiKey)
     {
         try
         {
@@ -1617,7 +1614,7 @@ public class AdminController : ControllerBase
 
             // 解析现有的API密钥
             var apiKeys = JsonConvert.DeserializeObject<List<string>>(group.ApiKeys) ?? new List<string>();
-            var keyToRemove = apiKeys.FirstOrDefault(k => k == request.ApiKey);
+            var keyToRemove = apiKeys.FirstOrDefault(k => k == apiKey);
 
             if (keyToRemove == null)
             {
@@ -1661,12 +1658,12 @@ public class AdminController : ControllerBase
     /// <summary>
     /// 从分组中删除指定的模型（级联删除相关的健康检查记录）
     /// </summary>
-    [HttpDelete("groups/{groupId}/models")]
-    public async Task<IActionResult> DeleteModelFromGroup(string groupId, [FromBody] DeleteModelRequest request)
+    [HttpDelete("groups/{groupId}/models/{modelId}")]
+    public async Task<IActionResult> DeleteModelFromGroup(string groupId, string modelId)
     {
         try
         {
-            _logger.LogInformation("管理员请求从分组 {GroupId} 中删除模型: {ModelId}", groupId, request.ModelId);
+            _logger.LogInformation("管理员请求从分组 {GroupId} 中删除模型: {ModelId}", groupId, modelId);
 
             var group = await _db.Queryable<GroupConfig>()
                 .Where(g => g.Id == groupId && !g.IsDeleted)
@@ -1678,7 +1675,7 @@ public class AdminController : ControllerBase
 
             // 解析现有的模型列表
             var models = JsonConvert.DeserializeObject<List<string>>(group.Models) ?? new List<string>();
-            var modelToRemove = models.FirstOrDefault(m => m == request.ModelId);
+            var modelToRemove = models.FirstOrDefault(m => m == modelId);
 
             if (modelToRemove == null)
             {
@@ -1697,16 +1694,16 @@ public class AdminController : ControllerBase
                     var aliases = JsonConvert.DeserializeObject<Dictionary<string, string>>(group.ModelAliases) ?? new Dictionary<string, string>();
 
                     // 移除以该模型为值的别名映射
-                    var aliasesToRemove = aliases.Where(kv => kv.Value == request.ModelId).Select(kv => kv.Key).ToList();
+                    var aliasesToRemove = aliases.Where(kv => kv.Value == modelId).Select(kv => kv.Key).ToList();
                     foreach (var alias in aliasesToRemove)
                     {
                         aliases.Remove(alias);
                     }
 
                     // 移除以该模型为键的别名映射
-                    if (aliases.ContainsKey(request.ModelId))
+                    if (aliases.ContainsKey(modelId))
                     {
-                        aliases.Remove(request.ModelId);
+                        aliases.Remove(modelId);
                     }
 
                     group.ModelAliases = JsonConvert.SerializeObject(aliases);
@@ -1723,22 +1720,22 @@ public class AdminController : ControllerBase
             await _db.Updateable(group).ExecuteCommandAsync();
 
             // 级联删除相关的健康检查记录
-            await DeleteHealthCheckRecordsByModel(groupId, request.ModelId);
+            await DeleteHealthCheckRecordsByModel(groupId, modelId);
 
-            _logger.LogInformation("成功从分组 {GroupId} 中删除模型 {ModelId} 及相关健康检查记录", groupId, request.ModelId);
+            _logger.LogInformation("成功从分组 {GroupId} 中删除模型 {ModelId} 及相关健康检查记录", groupId, modelId);
             return Ok(new
             {
                 success = true,
                 message = "模型删除成功",
                 group_id = groupId,
-                model_id = request.ModelId,
+                model_id = modelId,
                 remaining_models = models.Count,
                 operation_time = DateTime.Now
             });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "删除模型时发生异常: {GroupId}, {ModelId}", groupId, request.ModelId);
+            _logger.LogError(ex, "删除模型时发生异常: {GroupId}, {ModelId}", groupId, modelId);
             return StatusCode(500, new
             {
                 success = false,
@@ -1827,7 +1824,7 @@ public class AdminController : ControllerBase
         }
     }
 
-    #endregion
+    #endregion 健康检查记录删除辅助方法
 
     /// <summary>
     /// 计算密钥哈希值
@@ -1838,26 +1835,4 @@ public class AdminController : ControllerBase
         var hashBytes = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(apiKey));
         return Convert.ToHexString(hashBytes);
     }
-}
-
-/// <summary>
-/// 删除API密钥请求
-/// </summary>
-public class DeleteApiKeyRequest
-{
-    /// <summary>
-    /// 要删除的API密钥
-    /// </summary>
-    public string ApiKey { get; set; } = string.Empty;
-}
-
-/// <summary>
-/// 删除模型请求
-/// </summary>
-public class DeleteModelRequest
-{
-    /// <summary>
-    /// 要删除的模型ID
-    /// </summary>
-    public string ModelId { get; set; } = string.Empty;
 }

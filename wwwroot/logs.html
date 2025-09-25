@@ -11,6 +11,55 @@
     <link rel="shortcut icon" href="/favicon.ico?v=2" type="image/x-icon">
     <link rel="apple-touch-icon" href="/favicon.png?v=2" />
 
+    <!-- 早期认证检查脚本 - 在页面渲染前执行 -->
+    <script>
+        // 立即检查认证状态，避免显示未授权内容
+        (function() {
+            const token = localStorage.getItem('authToken');
+            if (!token) {
+                // 没有token，立即跳转到登录页
+                window.location.href = '/login';
+                return;
+            }
+
+            // 有token，但需要验证其有效性
+            // 使用同步方式快速检查token格式和过期时间
+            try {
+                // 简单的JWT token格式检查
+                const parts = token.split('.');
+                if (parts.length !== 3) {
+                    localStorage.removeItem('authToken');
+                    localStorage.removeItem('tokenExpires');
+                    window.location.href = '/login';
+                    return;
+                }
+
+                // 检查本地存储的过期时间
+                const tokenExpires = localStorage.getItem('tokenExpires');
+                if (tokenExpires) {
+                    const expiresAt = new Date(tokenExpires);
+                    const now = new Date();
+                    if (now >= expiresAt) {
+                        // token已过期
+                        localStorage.removeItem('authToken');
+                        localStorage.removeItem('tokenExpires');
+                        window.location.href = '/login';
+                        return;
+                    }
+                }
+
+                // token格式正确且未过期，继续加载页面
+                // 详细的服务器端验证将在Alpine.js初始化时进行
+            } catch (error) {
+                // token解析失败，清理并跳转
+                localStorage.removeItem('authToken');
+                localStorage.removeItem('tokenExpires');
+                window.location.href = '/login';
+                return;
+            }
+        })();
+    </script>
+
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
     <!-- 升级到最新版本的图表库 -->

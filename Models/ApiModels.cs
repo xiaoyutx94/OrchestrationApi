@@ -544,6 +544,9 @@ public class GroupRequest
 
     [JsonProperty("proxy_config")]
     public ProxyConfiguration? ProxyConfig { get; set; }
+
+    [JsonProperty("health_check_enabled")]
+    public bool HealthCheckEnabled { get; set; } = true;
 }
 
 /// <summary>

@@ -86,6 +86,13 @@ public class GroupConfig
     [SugarColumn(ColumnName = "fake_streaming")]
     [DefaultValue(false)]
     public bool FakeStreaming { get; set; } = false;
+
+    /// <summary>
+    /// 健康检查开关：是否对该分组进行定时健康检查
+    /// </summary>
+    [SugarColumn(ColumnName = "health_check_enabled")]
+    [DefaultValue(true)]
+    public bool HealthCheckEnabled { get; set; } = true;
 }
 
 /// <summary>

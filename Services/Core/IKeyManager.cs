@@ -831,6 +831,7 @@ public class KeyManager : IKeyManager
                     test_model = group.TestModel,
                     priority = group.Priority,
                     enabled = group.Enabled,
+                    health_check_enabled = group.HealthCheckEnabled, // 添加健康检查开关
                     healthy = isHealthy,
                     total_keys = totalKeys,
                     available_keys = availableKeys,
@@ -879,6 +880,7 @@ public class KeyManager : IKeyManager
                 Priority = groupRequest.Priority,
                 Enabled = groupRequest.Enabled,
                 FakeStreaming = groupRequest.FakeStreaming, // 添加假流配置支持
+                HealthCheckEnabled = groupRequest.HealthCheckEnabled, // 添加健康检查开关支持
                 CreatedAt = DateTime.Now,
                 UpdatedAt = DateTime.Now
             };
@@ -907,6 +909,26 @@ public class KeyManager : IKeyManager
                 throw new InvalidOperationException($"分组 {id} 不存在");
             }
 
+            // 获取更新前的模型列表，用于检测被删除的模型
+            List<string> oldModels = new List<string>();
+            if (!string.IsNullOrEmpty(existingGroup.Models))
+            {
+                try
+                {
+                    oldModels = JsonConvert.DeserializeObject<List<string>>(existingGroup.Models) ?? new List<string>();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "解析现有模型列表时发生异常，将使用空列表");
+                }
+            }
+
+            // 获取新的模型列表
+            var newModels = groupRequest.Models ?? new List<string>();
+
+            // 找出被删除的模型
+            var deletedModels = oldModels.Except(newModels).ToList();
+
             existingGroup.GroupName = groupRequest.GroupName;
             existingGroup.ProviderType = groupRequest.ProviderType;
             existingGroup.BaseUrl = groupRequest.BaseUrl;
@@ -923,9 +945,19 @@ public class KeyManager : IKeyManager
             existingGroup.Priority = groupRequest.Priority;
             existingGroup.Enabled = groupRequest.Enabled;
             existingGroup.FakeStreaming = groupRequest.FakeStreaming; // 添加假流配置支持
+            existingGroup.HealthCheckEnabled = groupRequest.HealthCheckEnabled; // 添加健康检查开关支持
             existingGroup.UpdatedAt = DateTime.Now;
 
             await _db.Updateable(existingGroup).ExecuteCommandAsync();
+
+            // 如果有模型被删除，联动删除相关的健康检查记录
+            if (deletedModels.Any())
+            {
+                await DeleteHealthCheckRecordsByModelsAsync(id, deletedModels);
+                _logger.LogInformation("更新分组 {GroupId} 时删除了 {Count} 个模型的健康检查记录: {Models}",
+                    id, deletedModels.Count, string.Join(", ", deletedModels));
+            }
+
             _logger.LogInformation("更新分组成功: {GroupName} (ID: {GroupId})", groupRequest.GroupName, id);
         }
         catch (Exception ex)
@@ -1534,7 +1566,7 @@ public class KeyManager : IKeyManager
                 BaseUrl = string.IsNullOrWhiteSpace(baseUrl) ? null : baseUrl,
                 TimeoutSeconds = timeoutSeconds,
                 MaxRetries = maxRetries,
-                // headers 参数目前未在 ProviderConfig 中使用，此处保留
+                Headers = headers,
             };
 
             var modelsResponse = await provider.GetModelsAsync(providerConfig, cts.Token);
@@ -3017,6 +3049,35 @@ public class KeyManager : IKeyManager
                 operation_time = operationStartTime,
                 duration_ms = (DateTime.Now - operationStartTime).TotalMilliseconds
             };
+        }
+    }
+
+    /// <summary>
+    /// 删除指定分组中多个模型的健康检查记录
+    /// </summary>
+    /// <param name="groupId">分组ID</param>
+    /// <param name="modelIds">要删除的模型ID列表</param>
+    private async Task DeleteHealthCheckRecordsByModelsAsync(string groupId, List<string> modelIds)
+    {
+        if (!modelIds.Any())
+        {
+            return;
+        }
+
+        try
+        {
+            // 删除这些模型相关的健康检查结果记录
+            var deletedResults = await _db.Deleteable<HealthCheckResult>()
+                .Where(r => r.GroupId == groupId && r.ModelId != null && modelIds.Contains(r.ModelId))
+                .ExecuteCommandAsync();
+
+            _logger.LogInformation("删除分组 {GroupId} 中 {Count} 个模型的健康检查记录: {DeletedCount} 条",
+                groupId, modelIds.Count, deletedResults);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "删除分组 {GroupId} 中模型健康检查记录时发生异常: {Models}",
+                groupId, string.Join(", ", modelIds));
         }
     }
 }

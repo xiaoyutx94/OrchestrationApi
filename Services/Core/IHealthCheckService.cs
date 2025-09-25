@@ -11,9 +11,10 @@ public interface IHealthCheckService
     /// 执行服务商健康检查
     /// </summary>
     /// <param name="groupId">分组ID</param>
+    /// <param name="apiKey">API密钥（可选，用于认证检查）</param>
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>健康检查结果</returns>
-    Task<HealthCheckResult> CheckProviderHealthAsync(string groupId, CancellationToken cancellationToken = default);
+    Task<HealthCheckResult> CheckProviderHealthAsync(string groupId, string? apiKey = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 执行API密钥验证检查
@@ -107,6 +108,13 @@ public interface IHealthCheckService
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>清理的记录数量</returns>
     Task<int> CleanupExpiredHealthCheckRecordsAsync(int retentionDays = 30, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 分析健康检查结果的一致性
+    /// </summary>
+    /// <param name="results">健康检查结果列表</param>
+    /// <returns>状态分析结果</returns>
+    HealthCheckAnalysis AnalyzeHealthCheckConsistency(List<HealthCheckResult> results);
 }
 
 /// <summary>

@@ -40,10 +40,10 @@ public class DatabaseConfiguration
             }
 
             var client = new SqlSugarClient(config);
-            
+
             // 配置表前缀
             ConfigureTablePrefix(client, tablePrefix);
-            
+
             return client;
         });
 
@@ -64,7 +64,7 @@ public class DatabaseConfiguration
 
         // 配置所有实体的表名前缀
         client.CodeFirst.SetStringDefaultLength(200);
-        
+
         // 使用 CodeFirst 配置表名映射
         client.CodeFirst.As<GroupConfig>($"{tablePrefix}groups");
         client.CodeFirst.As<ProxyKey>($"{tablePrefix}proxy_keys");
@@ -84,9 +84,9 @@ public class DatabaseConfiguration
     {
         return dbType.ToLower() switch
         {
-            "mysql" => dbConfig.GetValue<string>("MySqlConnectionString") ?? 
+            "mysql" => dbConfig.GetValue<string>("MySqlConnectionString") ??
                       throw new InvalidOperationException("MySQL连接字符串未配置"),
-            "sqlite" => dbConfig.GetValue<string>("ConnectionString") ?? 
+            "sqlite" => dbConfig.GetValue<string>("ConnectionString") ??
                        "Data Source=Data/orchestration.db",
             _ => throw new NotSupportedException($"不支持的数据库类型: {dbType}")
         };
@@ -112,6 +112,7 @@ public class DatabaseConfiguration
 public interface IDatabaseInitializer
 {
     Task InitializeAsync();
+
     Task SeedDataAsync();
 }
 
@@ -125,7 +126,7 @@ public class DatabaseInitializer : IDatabaseInitializer
     private readonly IConfiguration _configuration;
     private readonly string _tablePrefix;
 
-    public DatabaseInitializer(ISqlSugarClient db, ILogger<DatabaseInitializer> logger, 
+    public DatabaseInitializer(ISqlSugarClient db, ILogger<DatabaseInitializer> logger,
         IConfiguration configuration)
     {
         _db = db;
@@ -145,7 +146,7 @@ public class DatabaseInitializer : IDatabaseInitializer
             _logger.LogInformation("开始初始化数据库结构...");
 
             // 确保数据目录存在 - 兼容本地开发和容器环境
-            var dataDir = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") == "Development" 
+            var dataDir = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") == "Development"
                 ? Path.Combine(Directory.GetCurrentDirectory(), "Data")
                 : "/app/data";
             if (!Directory.Exists(dataDir))
@@ -337,6 +338,7 @@ public class DatabaseInitializer : IDatabaseInitializer
                     RpmLimit = 100,
                     Priority = 1,
                     Enabled = false, // 默认禁用，需要用户配置有效密钥后启用
+                    HealthCheckEnabled = true, // 默认启用健康检查
                     CreatedAt = DateTime.Now,
                     UpdatedAt = DateTime.Now
                 };
@@ -370,10 +372,10 @@ public class DatabaseInitializer : IDatabaseInitializer
     private async Task CreateGroupConfigTableManually()
     {
         var dbType = _db.CurrentConnectionConfig.DbType;
-        
-            string createSql = dbType switch
-            {
-                DbType.Sqlite => $@"
+
+        string createSql = dbType switch
+        {
+            DbType.Sqlite => $@"
                 CREATE TABLE IF NOT EXISTS {_tablePrefix}groups (
                     id TEXT PRIMARY KEY,
                     group_name TEXT NOT NULL,
@@ -435,7 +437,7 @@ public class DatabaseInitializer : IDatabaseInitializer
     private async Task CreateKeyValidationTableManually()
     {
         var dbType = _db.CurrentConnectionConfig.DbType;
-        
+
         string createSql = dbType switch
         {
             DbType.Sqlite => $@"
@@ -476,7 +478,7 @@ public class DatabaseInitializer : IDatabaseInitializer
     private async Task CreateRequestLogTableManually()
     {
         var dbType = _db.CurrentConnectionConfig.DbType;
-        
+
         string createSql = dbType switch
         {
             DbType.Sqlite => $@"
@@ -547,7 +549,7 @@ public class DatabaseInitializer : IDatabaseInitializer
     private async Task CreateKeyUsageStatsTableManually()
     {
         var dbType = _db.CurrentConnectionConfig.DbType;
-        
+
         string createSql = dbType switch
         {
             DbType.Sqlite => $@"
@@ -581,10 +583,10 @@ public class DatabaseInitializer : IDatabaseInitializer
         string createIndexSql = dbType switch
         {
             DbType.Sqlite => $@"
-                CREATE INDEX IF NOT EXISTS idx_key_usage_stats_group_key 
+                CREATE INDEX IF NOT EXISTS idx_key_usage_stats_group_key
                 ON {_tablePrefix}key_usage_stats(group_id, api_key_hash)",
             DbType.MySql => $@"
-                CREATE INDEX IF NOT EXISTS idx_key_usage_stats_group_key 
+                CREATE INDEX IF NOT EXISTS idx_key_usage_stats_group_key
                 ON {_tablePrefix}key_usage_stats(group_id, api_key_hash)",
             _ => throw new NotSupportedException($"不支持的数据库类型: {dbType}")
         };
@@ -632,7 +634,7 @@ public class DatabaseInitializer : IDatabaseInitializer
             foreach (var apiKey in apiKeys)
             {
                 var keyHash = ComputeKeyHash(apiKey);
-                
+
                 // 检查是否已存在统计记录
                 var existingStats = await _db.Queryable<KeyUsageStats>()
                     .Where(s => s.GroupId == groupId && s.ApiKeyHash == keyHash)
@@ -651,12 +653,12 @@ public class DatabaseInitializer : IDatabaseInitializer
                     };
 
                     await _db.Insertable(newStats).ExecuteCommandAsync();
-                    _logger.LogDebug("为分组 {GroupId} 创建密钥使用统计记录，密钥: {KeyPrefix}", 
+                    _logger.LogDebug("为分组 {GroupId} 创建密钥使用统计记录，密钥: {KeyPrefix}",
                         groupId, apiKey.Substring(0, Math.Min(8, apiKey.Length)));
                 }
             }
 
-            _logger.LogInformation("分组 {GroupId} 的密钥使用统计初始化完成，共处理 {KeyCount} 个密钥", 
+            _logger.LogInformation("分组 {GroupId} 的密钥使用统计初始化完成，共处理 {KeyCount} 个密钥",
                 groupId, apiKeys.Length);
         }
         catch (Exception ex)
@@ -681,7 +683,7 @@ public class DatabaseInitializer : IDatabaseInitializer
     /// <summary>
     /// 当前数据库版本
     /// </summary>
-    private const string CURRENT_DATABASE_VERSION = "1.6.0";
+    private const string CURRENT_DATABASE_VERSION = "1.7.0";
 
     /// <summary>
     /// 初始化数据库版本管理表
@@ -689,7 +691,7 @@ public class DatabaseInitializer : IDatabaseInitializer
     private async Task InitializeDatabaseVersionTable()
     {
         var dbType = _db.CurrentConnectionConfig.DbType;
-        
+
         string createSql = dbType switch
         {
             DbType.Sqlite => $@"
@@ -737,7 +739,7 @@ public class DatabaseInitializer : IDatabaseInitializer
     private async Task RecordDatabaseVersion(string version, string description)
     {
         var dbType = _db.CurrentConnectionConfig.DbType;
-        
+
         string insertSql = dbType switch
         {
             DbType.Sqlite => $"INSERT OR IGNORE INTO {_tablePrefix}database_versions (version, applied_at, description) VALUES (@version, @applied_at, @description)",
@@ -745,10 +747,10 @@ public class DatabaseInitializer : IDatabaseInitializer
             _ => throw new NotSupportedException($"不支持的数据库类型: {dbType}")
         };
 
-        object appliedAt = dbType == DbType.Sqlite 
-            ? DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") 
+        object appliedAt = dbType == DbType.Sqlite
+            ? DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
             : DateTime.Now;
-        
+
         await _db.Ado.ExecuteCommandAsync(insertSql, new { version, applied_at = appliedAt, description });
         _logger.LogInformation("记录数据库版本: {Version} - {Description}", version, description);
     }
@@ -761,14 +763,14 @@ public class DatabaseInitializer : IDatabaseInitializer
         try
         {
             var dbType = _db.CurrentConnectionConfig.DbType;
-            
+
             string sql = dbType switch
             {
                 DbType.Sqlite => @"
-                    SELECT COUNT(*) FROM pragma_table_info(@tableName) 
+                    SELECT COUNT(*) FROM pragma_table_info(@tableName)
                     WHERE name = @columnName",
                 DbType.MySql => @"
-                    SELECT COUNT(*) FROM information_schema.COLUMNS 
+                    SELECT COUNT(*) FROM information_schema.COLUMNS
                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @tableName AND COLUMN_NAME = @columnName",
                 _ => throw new NotSupportedException($"不支持的数据库类型: {dbType}")
             };
@@ -791,14 +793,14 @@ public class DatabaseInitializer : IDatabaseInitializer
         try
         {
             var dbType = _db.CurrentConnectionConfig.DbType;
-            
+
             string sql = dbType switch
             {
                 DbType.Sqlite => @"
-                    SELECT COUNT(*) FROM sqlite_master 
+                    SELECT COUNT(*) FROM sqlite_master
                     WHERE type='table' AND name=@tableName",
                 DbType.MySql => @"
-                    SELECT COUNT(*) FROM information_schema.TABLES 
+                    SELECT COUNT(*) FROM information_schema.TABLES
                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @tableName",
                 _ => throw new NotSupportedException($"不支持的数据库类型: {dbType}")
             };
@@ -818,28 +820,28 @@ public class DatabaseInitializer : IDatabaseInitializer
     /// </summary>
     private async Task ExecuteDatabaseMigrations(string currentVersion)
     {
-        _logger.LogInformation("开始执行数据库增量更新，当前版本: {CurrentVersion}, 目标版本: {TargetVersion}", 
+        _logger.LogInformation("开始执行数据库增量更新，当前版本: {CurrentVersion}, 目标版本: {TargetVersion}",
             currentVersion, CURRENT_DATABASE_VERSION);
 
         var migrations = GetMigrationScripts();
-        
+
         foreach (var migration in migrations)
         {
             if (IsVersionGreater(migration.Version, currentVersion))
             {
                 try
                 {
-                    _logger.LogInformation("执行数据库迁移: {Version} - {Description}", 
+                    _logger.LogInformation("执行数据库迁移: {Version} - {Description}",
                         migration.Version, migration.Description);
-                    
+
                     await migration.ExecuteAsync(_db, _logger, this);
                     await RecordDatabaseVersion(migration.Version, migration.Description);
-                    
+
                     _logger.LogInformation("数据库迁移完成: {Version}", migration.Version);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "数据库迁移失败: {Version} - {Description}", 
+                    _logger.LogError(ex, "数据库迁移失败: {Version} - {Description}",
                         migration.Version, migration.Description);
                     throw;
                 }
@@ -856,18 +858,18 @@ public class DatabaseInitializer : IDatabaseInitializer
     {
         var v1Parts = version1.Split('.').Select(int.Parse).ToArray();
         var v2Parts = version2.Split('.').Select(int.Parse).ToArray();
-        
+
         var maxLength = Math.Max(v1Parts.Length, v2Parts.Length);
-        
+
         for (int i = 0; i < maxLength; i++)
         {
             var v1Part = i < v1Parts.Length ? v1Parts[i] : 0;
             var v2Part = i < v2Parts.Length ? v2Parts[i] : 0;
-            
+
             if (v1Part > v2Part) return true;
             if (v1Part < v2Part) return false;
         }
-        
+
         return false;
     }
 
@@ -895,7 +897,7 @@ public class DatabaseInitializer : IDatabaseInitializer
             },
             new DatabaseMigration
             {
-                Version = "1.2.0", 
+                Version = "1.2.0",
                 Description = "添加 GroupConfig 表的 is_deleted 字段",
                 ExecuteAsync = async (db, logger, initializer) =>
                 {
@@ -937,12 +939,21 @@ public class DatabaseInitializer : IDatabaseInitializer
                 {
                     await initializer.AddApiKeyMaskedToHealthCheckResult();
                 }
+            },
+            new DatabaseMigration
+            {
+                Version = "1.7.0",
+                Description = "添加 GroupConfig 表的健康检查开关字段 (health_check_enabled)",
+                ExecuteAsync = async (db, logger, initializer) =>
+                {
+                    await initializer.AddHealthCheckEnabledToGroupConfig();
+                }
             }
 
             // 添加新迁移的示例：
             // new DatabaseMigration
             // {
-            //     Version = "1.7.0",
+            //     Version = "1.8.0",
             //     Description = "添加新表或字段的描述",
             //     ExecuteAsync = async (db, logger, initializer) =>
             //     {
@@ -960,11 +971,11 @@ public class DatabaseInitializer : IDatabaseInitializer
     {
         var tableName = $"{_tablePrefix}key_validation";
         const string columnName = "last_status_code";
-        
+
         if (await TableExists(tableName) && !await ColumnExists(tableName, columnName))
         {
             var dbType = _db.CurrentConnectionConfig.DbType;
-            
+
             string alterSql = dbType switch
             {
                 DbType.Sqlite => $"ALTER TABLE {tableName} ADD COLUMN {columnName} INTEGER",
@@ -988,11 +999,11 @@ public class DatabaseInitializer : IDatabaseInitializer
     {
         var tableName = $"{_tablePrefix}groups";
         const string columnName = "is_deleted";
-        
+
         if (await TableExists(tableName) && !await ColumnExists(tableName, columnName))
         {
             var dbType = _db.CurrentConnectionConfig.DbType;
-            
+
             string alterSql = dbType switch
             {
                 DbType.Sqlite => $"ALTER TABLE {tableName} ADD COLUMN {columnName} INTEGER DEFAULT 0",
@@ -1016,11 +1027,11 @@ public class DatabaseInitializer : IDatabaseInitializer
     {
         var tableName = $"{_tablePrefix}groups";
         const string columnName = "headers";
-        
+
         if (await TableExists(tableName) && !await ColumnExists(tableName, columnName))
         {
             var dbType = _db.CurrentConnectionConfig.DbType;
-            
+
             string alterSql = dbType switch
             {
                 DbType.Sqlite => $"ALTER TABLE {tableName} ADD COLUMN {columnName} TEXT",
@@ -1043,13 +1054,13 @@ public class DatabaseInitializer : IDatabaseInitializer
     private async Task AddProxyConfigToGroupConfig()
     {
         var tableName = $"{_tablePrefix}groups";
-        
+
         // 添加 proxy_enabled 字段
         const string proxyEnabledColumn = "proxy_enabled";
         if (await TableExists(tableName) && !await ColumnExists(tableName, proxyEnabledColumn))
         {
             var dbType = _db.CurrentConnectionConfig.DbType;
-            
+
             string alterSql = dbType switch
             {
                 DbType.Sqlite => $"ALTER TABLE {tableName} ADD COLUMN {proxyEnabledColumn} INTEGER DEFAULT 0",
@@ -1070,7 +1081,7 @@ public class DatabaseInitializer : IDatabaseInitializer
         if (await TableExists(tableName) && !await ColumnExists(tableName, proxyConfigColumn))
         {
             var dbType = _db.CurrentConnectionConfig.DbType;
-            
+
             string alterSql = dbType switch
             {
                 DbType.Sqlite => $"ALTER TABLE {tableName} ADD COLUMN {proxyConfigColumn} TEXT",
@@ -1094,11 +1105,11 @@ public class DatabaseInitializer : IDatabaseInitializer
     {
         var tableName = $"{_tablePrefix}groups";
         const string columnName = "fake_streaming";
-        
+
         if (await TableExists(tableName) && !await ColumnExists(tableName, columnName))
         {
             var dbType = _db.CurrentConnectionConfig.DbType;
-            
+
             string alterSql = dbType switch
             {
                 DbType.Sqlite => $"ALTER TABLE {tableName} ADD COLUMN {columnName} INTEGER DEFAULT 0",
@@ -1144,118 +1155,30 @@ public class DatabaseInitializer : IDatabaseInitializer
     }
 
     /// <summary>
-    /// 为现有的健康检查记录生成掩码版本
-    /// 通过当前配置的API密钥匹配哈希值来生成正确的掩码
+    /// 添加健康检查开关字段到 GroupConfig 表
     /// </summary>
-    private async Task GenerateMaskedKeysForExistingRecords()
+    private async Task AddHealthCheckEnabledToGroupConfig()
     {
-        try
+        var tableName = $"{_tablePrefix}groups";
+        const string columnName = "health_check_enabled";
+
+        if (await TableExists(tableName) && !await ColumnExists(tableName, columnName))
         {
-            _logger.LogInformation("开始为现有健康检查记录生成掩码版本...");
+            var dbType = _db.CurrentConnectionConfig.DbType;
 
-            // 获取所有当前配置的API密钥
-            var currentApiKeys = await GetAllCurrentApiKeys();
-            if (!currentApiKeys.Any())
+            string alterSql = dbType switch
             {
-                _logger.LogWarning("未找到当前配置的API密钥，跳过掩码生成");
-                return;
-            }
+                DbType.Sqlite => $"ALTER TABLE {tableName} ADD COLUMN {columnName} INTEGER DEFAULT 1",
+                DbType.MySql => $"ALTER TABLE {tableName} ADD COLUMN {columnName} TINYINT DEFAULT 1",
+                _ => throw new NotSupportedException($"不支持的数据库类型: {dbType}")
+            };
 
-            // 为每个API密钥计算哈希值和掩码
-            var keyMappings = new Dictionary<string, string>(); // hash -> masked_key
-            foreach (var apiKey in currentApiKeys)
-            {
-                var hash = OrchestrationApi.Utils.ApiKeyMaskingUtils.ComputeKeyHash(apiKey);
-                var masked = OrchestrationApi.Utils.ApiKeyMaskingUtils.MaskApiKey(apiKey);
-                keyMappings[hash] = masked;
-            }
-
-            _logger.LogInformation("计算了 {Count} 个API密钥的哈希值和掩码", keyMappings.Count);
-
-            // 更新匹配的记录
-            var tableName = $"{_tablePrefix}health_check_results";
-            int totalUpdated = 0;
-
-            foreach (var mapping in keyMappings)
-            {
-                string updateSql = $@"
-                    UPDATE {tableName}
-                    SET api_key_masked = @maskedKey
-                    WHERE api_key_hash = @hash AND api_key_masked IS NULL";
-
-                var affectedRows = await _db.Ado.ExecuteCommandAsync(updateSql, new
-                {
-                    maskedKey = mapping.Value,
-                    hash = mapping.Key
-                });
-
-                if (affectedRows > 0)
-                {
-                    totalUpdated += affectedRows;
-                    _logger.LogDebug("为哈希 {Hash} 的 {Count} 条记录设置了掩码 {Masked}",
-                        mapping.Key.Substring(0, 8) + "...", affectedRows, mapping.Value);
-                }
-            }
-
-            // 为无法匹配的记录设置占位符（这些可能是已删除的API密钥）
-            string placeholderSql = $@"
-                UPDATE {tableName}
-                SET api_key_masked = 'sk-****************************'
-                WHERE api_key_hash IS NOT NULL AND api_key_masked IS NULL";
-
-            var placeholderRows = await _db.Ado.ExecuteCommandAsync(placeholderSql);
-
-            _logger.LogInformation("掩码生成完成: {Matched} 条记录匹配成功, {Placeholder} 条记录使用占位符",
-                totalUpdated, placeholderRows);
+            await _db.Ado.ExecuteCommandAsync(alterSql);
+            _logger.LogInformation("成功添加字段 {TableName}.{ColumnName}", tableName, columnName);
         }
-        catch (Exception ex)
+        else
         {
-            _logger.LogError(ex, "为现有健康检查记录生成掩码版本时出错");
-        }
-    }
-
-    /// <summary>
-    /// 获取所有当前配置的API密钥
-    /// </summary>
-    private async Task<List<string>> GetAllCurrentApiKeys()
-    {
-        try
-        {
-            // 使用 SqlSugar 的 Queryable 方式查询
-            var apiKeysJsonList = await _db.Queryable<GroupConfig>()
-                .Where(g => g.Enabled)
-                .Select(g => g.ApiKeys)
-                .ToListAsync();
-            var allApiKeys = new List<string>();
-
-            foreach (var apiKeysJson in apiKeysJsonList)
-            {
-                if (string.IsNullOrEmpty(apiKeysJson)) continue;
-
-                try
-                {
-                    var keys = Newtonsoft.Json.JsonConvert.DeserializeObject<List<string>>(apiKeysJson);
-                    if (keys != null)
-                    {
-                        allApiKeys.AddRange(keys.Where(k => !string.IsNullOrEmpty(k)));
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "解析API密钥JSON时出错: {Json}", apiKeysJson);
-                }
-            }
-
-            var uniqueKeys = allApiKeys.Distinct().ToList();
-            _logger.LogInformation("从 {GroupCount} 个分组中获取到 {KeyCount} 个唯一API密钥",
-                apiKeysJsonList.Count, uniqueKeys.Count);
-
-            return uniqueKeys;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "获取当前配置的API密钥时出错");
-            return [];
+            _logger.LogDebug("字段 {TableName}.{ColumnName} 已存在，跳过添加", tableName, columnName);
         }
     }
 
@@ -1390,7 +1313,7 @@ public class DatabaseInitializer : IDatabaseInitializer
         }
     }
 
-    #endregion
+    #endregion 数据库版本管理和增量更新
 }
 
 /// <summary>

@@ -239,8 +239,6 @@ public class OpenAiProvider : ILLMProvider
         return Task.FromResult<HttpContent>(new StringContent(json, Encoding.UTF8, "application/json"));
     }
 
-
-
     /// <summary>
     /// 准备HTTP请求头
     /// </summary>
@@ -252,6 +250,7 @@ public class OpenAiProvider : ILLMProvider
         var headers = new Dictionary<string, string>
         {
             ["Authorization"] = $"Bearer {apiKey}",
+            ["x-api-key"] = $"{apiKey}",
             ["Content-Type"] = "application/json"
         };
 
@@ -323,9 +322,6 @@ public class OpenAiProvider : ILLMProvider
             var headers = PrepareRequestHeaders(apiKey, config);
             foreach (var header in headers)
             {
-                if (header.Key == "Content-Type")
-                    continue; // Content-Type 已经通过 HttpContent 设置
-
                 request.Headers.TryAddWithoutValidation(header.Key, header.Value);
             }
 
@@ -335,7 +331,7 @@ public class OpenAiProvider : ILLMProvider
             using var responseTimeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(responseTimeoutSeconds));
             using var combinedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, responseTimeoutCts.Token);
 
-            _logger.LogDebug("OpenAI HTTP请求使用连接超时: {ConnectionTimeoutSeconds}秒, 响应超时: {ResponseTimeoutSeconds}秒, 分组: {GroupId}({GroupName})", 
+            _logger.LogDebug("OpenAI HTTP请求使用连接超时: {ConnectionTimeoutSeconds}秒, 响应超时: {ResponseTimeoutSeconds}秒, 分组: {GroupId}({GroupName})",
                 connectionTimeoutSeconds, responseTimeoutSeconds, config.GroupId ?? "未知", config.GroupName ?? "未知");
 
             // 获取支持代理的HttpClient（使用连接超时设置）
@@ -376,13 +372,13 @@ public class OpenAiProvider : ILLMProvider
                     statusCode, elapsedMs, MaskApiKey(apiKey), isStreaming, useFakeStreaming, config.GroupId ?? "未知", config.GroupName ?? "未知");
 
                 Stream responseStream;
-                
+
                 if (useFakeStreaming)
                 {
                     // 假流模式：将非流式响应转换为流式格式
                     var nonStreamingContent = await response.Content.ReadAsStringAsync();
                     responseStream = ConvertToFakeStream(nonStreamingContent);
-                    
+
                     _logger.LogDebug("OpenAI 假流转换完成，原始响应长度: {ContentLength}, 分组: {GroupId}({GroupName})",
                         nonStreamingContent?.Length ?? 0, config.GroupId ?? "未知", config.GroupName ?? "未知");
                 }
@@ -422,7 +418,7 @@ public class OpenAiProvider : ILLMProvider
         catch (Exception ex)
         {
             lastException = ex;
-            _logger.LogError(ex, "OpenAI HTTP请求异常，API密钥: {ApiKey}, 分组: {GroupId}({GroupName})", 
+            _logger.LogError(ex, "OpenAI HTTP请求异常，API密钥: {ApiKey}, 分组: {GroupId}({GroupName})",
                 MaskApiKey(apiKey), config.GroupId ?? "未知", config.GroupName ?? "未知");
         }
 
@@ -522,7 +518,13 @@ public class OpenAiProvider : ILLMProvider
                 var fullUrl = $"{baseUrl}{endpoint}";
 
                 using var request = new HttpRequestMessage(HttpMethod.Get, fullUrl);
-                request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {apiKey}");
+
+                // 设置请求头
+                var headers = PrepareRequestHeaders(apiKey, config);
+                foreach (var header in headers)
+                {
+                    request.Headers.TryAddWithoutValidation(header.Key, header.Value);
+                }
 
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 cts.CancelAfter(TimeSpan.FromSeconds(config.TimeoutSeconds));
@@ -562,7 +564,7 @@ public class OpenAiProvider : ILLMProvider
         var reason = lastException?.Message ?? "获取 OpenAI 模型列表失败";
         _logger.LogWarning("所有API密钥都无法获取模型列表，将返回错误而非默认模型: {Reason}", reason);
         throw lastException ?? new Exception("获取 OpenAI 模型列表失败");
-        }
+    }
 
     public async Task<bool> ValidateApiKeyAsync(
         string apiKey,
@@ -669,17 +671,17 @@ public class OpenAiProvider : ILLMProvider
             for (int choiceIndex = 0; choiceIndex < response.Choices.Count; choiceIndex++)
             {
                 var choice = response.Choices[choiceIndex];
-                
+
                 // 如果有内容，分段发送
                 var contentStr = choice.Message?.Content?.ToString();
                 if (!string.IsNullOrEmpty(contentStr))
                 {
                     const int chunkSize = 50; // 每个chunk的字符数
-                    
+
                     for (int i = 0; i < contentStr.Length; i += chunkSize)
                     {
                         var chunkContent = contentStr.Substring(i, Math.Min(chunkSize, contentStr.Length - i));
-                        
+
                         var streamChunk = new
                         {
                             id = response.Id,
@@ -717,7 +719,7 @@ public class OpenAiProvider : ILLMProvider
                                 new
                                 {
                                     index = choiceIndex,
-                                    delta = new { 
+                                    delta = new {
                                         tool_calls = new[]
                                         {
                                             new
@@ -768,10 +770,10 @@ public class OpenAiProvider : ILLMProvider
 
             // 合并所有chunk
             var completeStreamContent = string.Join("", streamChunks);
-            
-            _logger.LogDebug("OpenAI 假流转换完成，生成了 {ChunkCount} 个chunk，总长度: {TotalLength}", 
+
+            _logger.LogDebug("OpenAI 假流转换完成，生成了 {ChunkCount} 个chunk，总长度: {TotalLength}",
                 streamChunks.Count, completeStreamContent.Length);
-            
+
             return new MemoryStream(Encoding.UTF8.GetBytes(completeStreamContent));
         }
         catch (Exception ex)

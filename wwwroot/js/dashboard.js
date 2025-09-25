@@ -297,6 +297,7 @@ function multiProviderDashboard() {
             provider_type: "",
             base_url: "",
             enabled: true,
+            health_check_enabled: true, // 健康检查开关
             timeout: 30,
             max_retries: 3,
             rotation_strategy: "round_robin",
@@ -392,8 +393,10 @@ function multiProviderDashboard() {
         // 系统状态计算属性（已移除平均响应时间计算）
 
         async init() {
-            // 首先检查是否已登录
+            // 执行详细的服务器端认证检查
+            // 注意：基本的token检查已在HTML中完成，这里主要做服务器端验证
             if (!await this.checkAuthentication()) {
+                console.warn('服务器端认证验证失败，跳转到登录页面');
                 window.location.href = '/login';
                 return;
             }
@@ -1569,6 +1572,7 @@ function multiProviderDashboard() {
                         fullGroupData.provider_type || "",
                     base_url: fullGroupData.base_url || "",
                     enabled: fullGroupData.enabled !== false,
+                    health_check_enabled: fullGroupData.health_check_enabled !== false, // 健康检查开关
                     timeout: parseInt(fullGroupData.timeout) || 30,
                     max_retries:
                         parseInt(fullGroupData.max_retries) || 3,
@@ -1906,6 +1910,7 @@ function multiProviderDashboard() {
                     test_model: this.groupFormData.test_model || null,
                     priority: this.groupFormData.priority || 0,
                     enabled: this.groupFormData.enabled !== undefined ? this.groupFormData.enabled : true,
+                    health_check_enabled: this.groupFormData.health_check_enabled !== undefined ? this.groupFormData.health_check_enabled : true, // 添加健康检查开关
                     fake_streaming: this.groupFormData.fake_streaming || false, // 添加假流配置
                     proxy_enabled: this.groupFormData.proxy_enabled || false,
                     proxy_config: this.groupFormData.proxy_enabled ? {
@@ -2014,6 +2019,7 @@ function multiProviderDashboard() {
                 provider_type: "",
                 base_url: "",
                 enabled: true,
+                health_check_enabled: true, // 健康检查开关
                 timeout: 30,
                 max_retries: 3,
                 rotation_strategy: "round_robin",
@@ -3887,10 +3893,10 @@ function multiProviderDashboard() {
             // 立即执行一次刷新
             this.refreshSystemHealthOnly();
 
-            // 设置定时器，每60秒刷新一次系统健康状态
-            setInterval(() => {
-                this.refreshSystemHealthOnly();
-            }, 60000); // 60秒刷新一次
+            // // 设置定时器，每60秒刷新一次系统健康状态
+            // setInterval(() => {
+            //     this.refreshSystemHealthOnly();
+            // }, 60000); // 60秒刷新一次
         },
 
         // 只刷新系统健康状态（第一排的系统信息）

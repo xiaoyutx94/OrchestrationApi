@@ -35,10 +35,10 @@ public class HealthCheckService : IHealthCheckService
         _configuration = configuration;
     }
 
-    public async Task<HealthCheckResult> CheckProviderHealthAsync(string groupId, CancellationToken cancellationToken = default)
+    public async Task<HealthCheckResult> CheckProviderHealthAsync(string groupId, string? apiKey = null, CancellationToken cancellationToken = default)
     {
         var stopwatch = Stopwatch.StartNew();
-        
+
         try
         {
             var group = await GetGroupConfigAsync(groupId);
@@ -50,7 +50,7 @@ public class HealthCheckService : IHealthCheckService
 
             var httpClient = _httpClientService.CreateHttpClient(group, 10); // 10秒超时
             var provider = _providerFactory.GetProvider(group.ProviderType);
-            
+
             if (provider == null)
             {
                 return CreateFailedResult(groupId, null, null, null, HealthCheckTypes.Provider,
@@ -64,15 +64,63 @@ public class HealthCheckService : IHealthCheckService
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
 
-            var response = await httpClient.GetAsync(healthCheckUrl, cts.Token);
+            // 构建HTTP请求，统一使用SendAsync方法
+            using var request = new HttpRequestMessage(HttpMethod.Get, healthCheckUrl);
+
+            if (!string.IsNullOrEmpty(apiKey))
+            {
+                // 如果提供了API密钥，则添加认证头
+                var headers = provider.PrepareRequestHeaders(apiKey, new ProviderConfig { BaseUrl = group.BaseUrl });
+                foreach (var header in headers)
+                {
+                    request.Headers.TryAddWithoutValidation(header.Key, header.Value);
+                }
+            }
+
+            var response = await httpClient.SendAsync(request, cts.Token);
             stopwatch.Stop();
 
             var isSuccess = response.IsSuccessStatusCode;
             var statusCode = (int)response.StatusCode;
             var responseTime = (int)stopwatch.ElapsedMilliseconds;
 
+            // 根据是否使用API密钥生成相应的错误消息
+            string? errorMessage = null;
+            if (!isSuccess)
+            {
+                if (!string.IsNullOrEmpty(apiKey))
+                {
+                    // 使用了API密钥的认证检查
+                    errorMessage = statusCode switch
+                    {
+                        401 => "API密钥无效或未授权",
+                        403 => "API密钥权限不足",
+                        404 => "服务商端点不存在",
+                        429 => "API密钥请求限流",
+                        500 => "服务商内部错误",
+                        503 => "服务商服务不可用",
+                        _ => $"服务商认证检查失败 (HTTP {statusCode})"
+                    };
+                }
+                else
+                {
+                    // 基础连接检查
+                    errorMessage = statusCode switch
+                    {
+                        404 => "服务商端点不存在",
+                        403 => "服务商访问被拒绝",
+                        500 => "服务商内部错误",
+                        503 => "服务商服务不可用",
+                        _ => $"服务商连接失败 (HTTP {statusCode})"
+                    };
+                }
+            }
+
+            _logger.LogDebug("服务商健康检查完成 - GroupId: {GroupId}, StatusCode: {StatusCode}, ResponseTime: {ResponseTime}ms, WithAuth: {WithAuth}",
+                groupId, statusCode, responseTime, !string.IsNullOrEmpty(apiKey));
+
             return CreateHealthCheckResult(groupId, null, null, null, HealthCheckTypes.Provider,
-                statusCode, responseTime, isSuccess, isSuccess ? null : $"HTTP {statusCode}",
+                statusCode, responseTime, isSuccess, errorMessage,
                 group.ProviderType, group.BaseUrl);
         }
         catch (OperationCanceledException)
@@ -93,7 +141,7 @@ public class HealthCheckService : IHealthCheckService
     public async Task<HealthCheckResult> CheckApiKeyHealthAsync(string groupId, string apiKey, CancellationToken cancellationToken = default)
     {
         var stopwatch = Stopwatch.StartNew();
-        
+
         try
         {
             var group = await GetGroupConfigAsync(groupId);
@@ -106,7 +154,7 @@ public class HealthCheckService : IHealthCheckService
 
             var httpClient = _httpClientService.CreateHttpClient(group, 10);
             var provider = _providerFactory.GetProvider(group.ProviderType);
-            
+
             if (provider == null)
             {
                 return CreateFailedResult(groupId, ApiKeyMaskingUtils.ComputeKeyHash(apiKey),
@@ -117,9 +165,9 @@ public class HealthCheckService : IHealthCheckService
             // 构建API密钥验证请求
             var baseUrl = provider.GetBaseUrl(new ProviderConfig { BaseUrl = group.BaseUrl });
             var modelsUrl = $"{baseUrl.TrimEnd('/')}/models";
-            
+
             var headers = provider.PrepareRequestHeaders(apiKey, new ProviderConfig { BaseUrl = group.BaseUrl });
-            
+
             using var request = new HttpRequestMessage(HttpMethod.Get, modelsUrl);
             foreach (var header in headers)
             {
@@ -135,7 +183,7 @@ public class HealthCheckService : IHealthCheckService
             var statusCode = (int)response.StatusCode;
             var responseTime = (int)stopwatch.ElapsedMilliseconds;
             var isSuccess = response.IsSuccessStatusCode;
-            
+
             string? errorMessage = null;
             if (!isSuccess)
             {
@@ -144,9 +192,15 @@ public class HealthCheckService : IHealthCheckService
                     401 => "API密钥无效或未授权",
                     403 => "API密钥权限不足",
                     429 => "API密钥请求限流",
-                    _ => $"HTTP {statusCode}"
+                    404 => "API密钥验证端点不存在",
+                    500 => "服务商内部错误",
+                    503 => "服务商服务不可用",
+                    _ => $"密钥验证失败 (HTTP {statusCode})"
                 };
             }
+
+            _logger.LogDebug("API密钥健康检查完成 - GroupId: {GroupId}, KeyHash: {KeyHash}, StatusCode: {StatusCode}, ResponseTime: {ResponseTime}ms",
+                groupId, ApiKeyMaskingUtils.ComputeKeyHash(apiKey), statusCode, responseTime);
 
             return CreateHealthCheckResult(groupId, ApiKeyMaskingUtils.ComputeKeyHash(apiKey),
                 ApiKeyMaskingUtils.MaskApiKey(apiKey), null, HealthCheckTypes.ApiKey,
@@ -172,7 +226,7 @@ public class HealthCheckService : IHealthCheckService
     public async Task<HealthCheckResult> CheckModelHealthAsync(string groupId, string apiKey, string modelId, CancellationToken cancellationToken = default)
     {
         var stopwatch = Stopwatch.StartNew();
-        
+
         try
         {
             var group = await GetGroupConfigAsync(groupId);
@@ -185,7 +239,7 @@ public class HealthCheckService : IHealthCheckService
 
             var httpClient = _httpClientService.CreateHttpClient(group, 15);
             var provider = _providerFactory.GetProvider(group.ProviderType);
-            
+
             if (provider == null)
             {
                 return CreateFailedResult(groupId, ApiKeyMaskingUtils.ComputeKeyHash(apiKey),
@@ -212,15 +266,24 @@ public class HealthCheckService : IHealthCheckService
             }
 
             var headers = provider.PrepareRequestHeaders(apiKey, providerConfig);
-            
+
             var baseUrl = provider.GetBaseUrl(providerConfig);
-            var chatUrl = $"{baseUrl.TrimEnd('/')}/{provider.GetChatCompletionEndpoint()}";
+            var endpoint = provider.GetChatCompletionEndpoint();
+
+            // 对于 Gemini provider，需要替换端点中的模型占位符
+            if (provider is GeminiProvider)
+            {
+                endpoint = endpoint.Replace("{model}", modelId);
+                _logger.LogDebug("Gemini 健康检查端点已替换模型占位符: {Endpoint}, 模型: {ModelId}", endpoint, modelId);
+            }
+
+            var chatUrl = $"{baseUrl.TrimEnd('/')}{endpoint}";
 
             using var request = new HttpRequestMessage(HttpMethod.Post, chatUrl)
             {
                 Content = content
             };
-            
+
             foreach (var header in headers)
             {
                 request.Headers.TryAddWithoutValidation(header.Key, header.Value);
@@ -235,19 +298,30 @@ public class HealthCheckService : IHealthCheckService
             var statusCode = (int)response.StatusCode;
             var responseTime = (int)stopwatch.ElapsedMilliseconds;
             var isSuccess = response.IsSuccessStatusCode;
-            
+
             string? errorMessage = null;
             if (!isSuccess)
             {
                 errorMessage = statusCode switch
                 {
-                    400 => "模型请求参数错误",
-                    401 => "API密钥无效",
+                    400 => "模型请求参数错误或格式不支持",
+                    401 => "API密钥在模型端点无效",
+                    403 => "密钥没有额度",
                     404 => "模型不存在或不可用",
-                    429 => "请求限流",
+                    429 => "模型请求限流",
+                    500 => "模型服务内部错误",
                     503 => "模型服务不可用",
-                    _ => $"HTTP {statusCode}"
+                    _ => $"模型检查失败 (HTTP {statusCode})"
                 };
+
+                // 记录详细的模型检查失败信息
+                _logger.LogWarning("模型健康检查失败 - GroupId: {GroupId}, Model: {ModelId}, StatusCode: {StatusCode}, Error: {ErrorMessage}",
+                    groupId, modelId, statusCode, errorMessage);
+            }
+            else
+            {
+                _logger.LogDebug("模型健康检查成功 - GroupId: {GroupId}, Model: {ModelId}, ResponseTime: {ResponseTime}ms",
+                    groupId, modelId, responseTime);
             }
 
             return CreateHealthCheckResult(groupId, ApiKeyMaskingUtils.ComputeKeyHash(apiKey),
@@ -361,8 +435,6 @@ public class HealthCheckService : IHealthCheckService
         }
     }
 
-
-
     private HealthCheckResult CreateHealthCheckResult(string groupId, string? apiKeyHash, string? apiKeyMasked,
         string? modelId, string checkType, int statusCode, int responseTime, bool isSuccess, string? errorMessage,
         string? providerType, string? baseUrl)
@@ -405,19 +477,25 @@ public class HealthCheckService : IHealthCheckService
                 return results;
             }
 
-            // 1. 检查服务商健康状态
-            var providerResult = await CheckProviderHealthAsync(groupId, cancellationToken);
+            // 获取API密钥列表
+            var apiKeys = JsonConvert.DeserializeObject<List<string>>(group.ApiKeys) ?? new List<string>();
+
+            // 1. 检查服务商健康状态（如果有API密钥，使用第一个进行认证检查）
+            var firstApiKey = apiKeys.FirstOrDefault();
+            var providerResult = await CheckProviderHealthAsync(groupId, firstApiKey, cancellationToken);
             results.Add(providerResult);
 
             // 如果服务商不健康，跳过后续检查
             if (!providerResult.IsHealthy())
             {
-                _logger.LogWarning("服务商不健康，跳过密钥和模型检查: {GroupId}", groupId);
+                _logger.LogWarning("服务商不健康，跳过密钥和模型检查: {GroupId} - 错误: {Error}",
+                    groupId, providerResult.ErrorMessage);
                 return results;
             }
 
+            _logger.LogDebug("服务商健康检查通过，开始检查API密钥: {GroupId}", groupId);
+
             // 2. 检查所有API密钥
-            var apiKeys = JsonConvert.DeserializeObject<List<string>>(group.ApiKeys) ?? new List<string>();
             foreach (var apiKey in apiKeys)
             {
                 if (cancellationToken.IsCancellationRequested) break;
@@ -428,6 +506,9 @@ public class HealthCheckService : IHealthCheckService
                 // 3. 如果密钥有效，检查该密钥下的所有模型
                 if (keyResult.IsHealthy())
                 {
+                    _logger.LogDebug("API密钥健康，开始检查模型: {GroupId}, KeyHash: {KeyHash}",
+                        groupId, ApiKeyMaskingUtils.ComputeKeyHash(apiKey));
+
                     var models = JsonConvert.DeserializeObject<List<string>>(group.Models) ?? new List<string>();
                     foreach (var model in models)
                     {
@@ -435,7 +516,26 @@ public class HealthCheckService : IHealthCheckService
 
                         var modelResult = await CheckModelHealthAsync(groupId, apiKey, model, cancellationToken);
                         results.Add(modelResult);
+
+                        // 记录模型检查结果
+                        if (!modelResult.IsHealthy())
+                        {
+                            _logger.LogWarning("模型检查失败但密钥有效 - GroupId: {GroupId}, Model: {Model}, " +
+                                "这可能表明模型端点与密钥验证端点存在差异", groupId, model);
+                        }
+
+                        // 在模型检查之间添加30秒延迟，防止触发429限制
+                        if (models.IndexOf(model) < models.Count - 1) // 不是最后一个模型
+                        {
+                            _logger.LogDebug("模型检查完成，等待30秒后检查下一个模型 - GroupId: {GroupId}, Model: {Model}", groupId, model);
+                            await Task.Delay(TimeSpan.FromSeconds(30), cancellationToken);
+                        }
                     }
+                }
+                else
+                {
+                    _logger.LogDebug("API密钥不健康，跳过模型检查: {GroupId}, KeyHash: {KeyHash}, Error: {Error}",
+                        groupId, ApiKeyMaskingUtils.ComputeKeyHash(apiKey), keyResult.ErrorMessage);
                 }
             }
 
@@ -455,7 +555,7 @@ public class HealthCheckService : IHealthCheckService
         try
         {
             var groups = await _db.Queryable<GroupConfig>()
-                .Where(g => g.Enabled && !g.IsDeleted)
+                .Where(g => g.Enabled && !g.IsDeleted && g.HealthCheckEnabled)
                 .ToListAsync();
 
             foreach (var group in groups)
@@ -661,5 +761,46 @@ public class HealthCheckService : IHealthCheckService
             _logger.LogError(ex, "清理过期健康检查记录时发生异常");
             return 0;
         }
+    }
+
+    /// <summary>
+    /// 分析健康检查结果的一致性，提供详细的状态解释
+    /// </summary>
+    /// <param name="results">健康检查结果列表</param>
+    /// <returns>状态分析结果</returns>
+    public HealthCheckAnalysis AnalyzeHealthCheckConsistency(List<HealthCheckResult> results)
+    {
+        var analysis = new HealthCheckAnalysis();
+
+        var providerResults = results.Where(r => r.CheckType == HealthCheckTypes.Provider).ToList();
+        var keyResults = results.Where(r => r.CheckType == HealthCheckTypes.ApiKey).ToList();
+        var modelResults = results.Where(r => r.CheckType == HealthCheckTypes.Model).ToList();
+
+        analysis.ProviderHealthy = providerResults.Any() && providerResults.All(r => r.IsHealthy());
+        analysis.KeysHealthy = keyResults.Any() && keyResults.All(r => r.IsHealthy());
+        analysis.ModelsHealthy = modelResults.Any() && modelResults.All(r => r.IsHealthy());
+
+        // 分析不一致的情况
+        if (analysis.ProviderHealthy && analysis.KeysHealthy && !analysis.ModelsHealthy)
+        {
+            analysis.IsInconsistent = true;
+            analysis.InconsistencyReason = "服务商和密钥验证通过，但模型检查失败。" +
+                "这通常表明 /models 端点可用但 /chat/completions 端点存在问题，" +
+                "可能的原因包括：模型不支持、请求格式不兼容、或聊天端点配置问题。";
+        }
+        else if (analysis.ProviderHealthy && !analysis.KeysHealthy)
+        {
+            analysis.InconsistencyReason = "服务商连接正常但密钥验证失败，请检查API密钥是否正确。";
+        }
+        else if (!analysis.ProviderHealthy)
+        {
+            analysis.InconsistencyReason = "服务商连接失败，请检查网络连接和服务商地址。";
+        }
+
+        analysis.TotalChecks = results.Count;
+        analysis.SuccessfulChecks = results.Count(r => r.IsHealthy());
+        analysis.FailedChecks = analysis.TotalChecks - analysis.SuccessfulChecks;
+
+        return analysis;
     }
 }

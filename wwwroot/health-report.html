@@ -11,9 +11,59 @@
     <link rel="shortcut icon" href="/favicon.ico?v=2" type="image/x-icon">
     <link rel="apple-touch-icon" href="/favicon.png?v=2" />
 
+    <!-- 早期认证检查脚本 - 在页面渲染前执行 -->
+    <script>
+        // 立即检查认证状态，避免显示未授权内容
+        (function() {
+            const token = localStorage.getItem('authToken');
+            if (!token) {
+                // 没有token，立即跳转到登录页
+                window.location.href = '/login';
+                return;
+            }
+
+            // 有token，但需要验证其有效性
+            // 使用同步方式快速检查token格式和过期时间
+            try {
+                // 简单的JWT token格式检查
+                const parts = token.split('.');
+                if (parts.length !== 3) {
+                    localStorage.removeItem('authToken');
+                    localStorage.removeItem('tokenExpires');
+                    window.location.href = '/login';
+                    return;
+                }
+
+                // 检查本地存储的过期时间
+                const tokenExpires = localStorage.getItem('tokenExpires');
+                if (tokenExpires) {
+                    const expiresAt = new Date(tokenExpires);
+                    const now = new Date();
+                    if (now >= expiresAt) {
+                        // token已过期
+                        localStorage.removeItem('authToken');
+                        localStorage.removeItem('tokenExpires');
+                        window.location.href = '/login';
+                        return;
+                    }
+                }
+
+                // token格式正确且未过期，继续加载页面
+                // 详细的服务器端验证将在Alpine.js初始化时进行
+            } catch (error) {
+                // token解析失败，清理并跳转
+                localStorage.removeItem('authToken');
+                localStorage.removeItem('tokenExpires');
+                window.location.href = '/login';
+                return;
+            }
+        })();
+    </script>
+
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
     <link rel="stylesheet" href="css/dashboard.css">
+    <link rel="stylesheet" href="css/modal-components.css">
 </head>
 
 <body class="bg-gray-100 min-h-screen">
@@ -45,7 +95,7 @@
                 </button>
 
                 <!-- 刷新按钮 -->
-                <button @click="loadHealthReport()" :disabled="loading"
+                <button @click="refreshAllData()" :disabled="loading"
                     class="bg-green-500 hover:bg-green-600 disabled:bg-green-300 text-white px-4 py-2 rounded-lg transition-colors">
                     <span x-show="!loading">刷新数据</span>
                     <span x-show="loading">加载中...</span>
@@ -390,6 +440,12 @@
                                     <span x-text="formatDateTime(group.provider_health.last_check)"></span>
                                 </td>
                                 <td class="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
+                                    <button @click="triggerGroupHealthCheck(group.group_id)"
+                                        :disabled="isGroupCheckInProgress(group.group_id)"
+                                        class="text-purple-600 hover:text-purple-900 disabled:text-purple-300 disabled:cursor-not-allowed">
+                                        <span x-show="!isGroupCheckInProgress(group.group_id)">检查</span>
+                                        <span x-show="isGroupCheckInProgress(group.group_id)">检查中...</span>
+                                    </button>
                                     <button @click="viewGroupDetails(group.group_id)"
                                         class="text-blue-600 hover:text-blue-900">查看详情</button>
                                     <button @click="toggleGroupStatus(group.group_id, group.enabled)"
@@ -429,10 +485,10 @@
                     x-transition:leave="transition ease-in duration-200"
                     x-transition:leave-start="opacity-100 transform scale-100"
                     x-transition:leave-end="opacity-0 transform scale-95"
-                    class="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-screen overflow-y-auto">
+                    class="bg-white rounded-lg shadow-xl max-w-4xl w-full flex flex-col max-h-[90vh]">
 
                     <!-- 模态框头部 -->
-                    <div class="flex items-center justify-between p-6 border-b border-gray-200">
+                    <div class="flex items-center justify-between p-6 border-b border-gray-200 flex-shrink-0">
                         <h3 class="text-lg font-medium text-gray-900">
                             服务商详情 - <span x-text="selectedGroup?.group_name || ''"></span>
                         </h3>
@@ -445,7 +501,7 @@
                     </div>
 
                     <!-- 模态框内容 -->
-                    <div class="p-6" x-show="selectedGroup">
+                    <div class="flex-1 overflow-y-auto p-6" x-show="selectedGroup">
                         <!-- 基本信息 -->
                         <div class="mb-6">
                             <h4 class="text-md font-medium text-gray-900 mb-3">基本信息</h4>
@@ -472,6 +528,10 @@
                                     <dd class="text-sm text-gray-900"
                                         x-text="formatDateTime(selectedGroup?.provider_health?.last_check)"></dd>
                                 </div>
+                                <div class="bg-gray-50 p-3 rounded md:col-span-2" x-show="selectedGroup?.provider_health?.error_message">
+                                    <dt class="text-sm font-medium text-gray-500">错误信息</dt>
+                                    <dd class="text-sm text-red-600 break-all" x-text="selectedGroup?.provider_health?.error_message || '-'"></dd>
+                                </div>
                             </div>
                         </div>
 
@@ -484,44 +544,62 @@
                                     总数: <span x-text="selectedGroup?.keys_health?.total_keys || 0"></span>)
                                 </span>
                             </h4>
-                            <div class="overflow-x-auto">
-                                <table class="min-w-full divide-y divide-gray-200">
+                            <div class="overflow-hidden">
+                                <table class="w-full divide-y divide-gray-200 table-fixed">
                                     <thead class="bg-gray-50">
                                         <tr>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap w-1/4">
                                                 密钥</th>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap w-16">
                                                 状态</th>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap w-16">
                                                 成功率</th>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap w-20">
                                                 响应时间</th>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap w-32">
                                                 最后检查</th>
+                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap w-1/4">
+                                                错误信息</th>
+                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap w-16">
+                                                操作</th>
                                         </tr>
                                     </thead>
                                     <tbody class="bg-white divide-y divide-gray-200">
                                         <template x-for="key in selectedGroup?.keys || []" :key="key.key_id">
                                             <tr>
-                                                <td class="px-4 py-2 text-sm font-mono text-gray-900">
-                                                    <span
-                                                        x-text="key.masked_key || key.api_key?.substring(0, 20) + '...'"></span>
+                                                <td class="px-4 py-2 text-sm font-mono text-gray-900 whitespace-nowrap w-1/4">
+                                                    <div class="truncate" :title="key.masked_key || key.api_key">
+                                                        <span x-text="key.masked_key || key.api_key?.substring(0, 20) + '...'"></span>
+                                                    </div>
                                                 </td>
-                                                <td class="px-4 py-2">
+                                                <td class="px-4 py-2 whitespace-nowrap w-16">
                                                     <span
                                                         class="inline-flex px-2 py-1 text-xs font-semibold rounded-full"
                                                         :class="getStatusClass(key.health_status)"
                                                         x-text="getStatusText(key.health_status)">
                                                     </span>
                                                 </td>
-                                                <td class="px-4 py-2 text-sm text-gray-900">
+                                                <td class="px-4 py-2 text-sm text-gray-900 whitespace-nowrap w-16">
                                                     <span x-text="(key.success_rate || 0).toFixed(1) + '%'"></span>
                                                 </td>
-                                                <td class="px-4 py-2 text-sm text-gray-900">
+                                                <td class="px-4 py-2 text-sm text-gray-900 whitespace-nowrap w-20">
                                                     <span x-text="Math.round(key.avg_response_time || 0) + 'ms'"></span>
                                                 </td>
-                                                <td class="px-4 py-2 text-sm text-gray-500">
+                                                <td class="px-4 py-2 text-sm text-gray-500 whitespace-nowrap w-32">
                                                     <span x-text="formatDateTime(key.last_check)"></span>
+                                                </td>
+                                                <td class="px-4 py-2 text-sm text-red-600 whitespace-nowrap w-1/4">
+                                                    <div class="truncate" :title="key.error_message || '-'">
+                                                        <span x-text="key.error_message || '-'"></span>
+                                                    </div>
+                                                </td>
+                                                <td class="px-4 py-2 whitespace-nowrap w-16">
+                                                    <button
+                                                        @click="deleteApiKey(selectedGroupId, key.api_key || key.masked_key)"
+                                                        class="text-red-600 hover:text-red-800 text-sm font-medium px-2 py-1 rounded hover:bg-red-50"
+                                                        title="删除此密钥">
+                                                        删除
+                                                    </button>
                                                 </td>
                                             </tr>
                                         </template>
@@ -539,44 +617,62 @@
                                     总数: <span x-text="selectedGroup?.models_health?.total_models || 0"></span>)
                                 </span>
                             </h4>
-                            <div class="overflow-x-auto">
-                                <table class="min-w-full divide-y divide-gray-200">
+                            <div class="overflow-hidden">
+                                <table class="w-full divide-y divide-gray-200 table-fixed">
                                     <thead class="bg-gray-50">
                                         <tr>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap w-1/4">
                                                 模型名称</th>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap w-16">
                                                 状态</th>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap w-16">
                                                 成功率</th>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap w-20">
                                                 响应时间</th>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap w-32">
                                                 最后检查</th>
+                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap w-1/4">
+                                                错误信息</th>
+                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap w-16">
+                                                操作</th>
                                         </tr>
                                     </thead>
                                     <tbody class="bg-white divide-y divide-gray-200">
                                         <template x-for="model in selectedGroup?.models || []" :key="model.model_name">
                                             <tr>
-                                                <td class="px-4 py-2 text-sm font-medium text-gray-900">
-                                                    <span x-text="model.model_name"></span>
+                                                <td class="px-4 py-2 text-sm font-medium text-gray-900 whitespace-nowrap w-1/4">
+                                                    <div class="truncate" :title="model.model_name">
+                                                        <span x-text="model.model_name"></span>
+                                                    </div>
                                                 </td>
-                                                <td class="px-4 py-2">
+                                                <td class="px-4 py-2 whitespace-nowrap w-16">
                                                     <span
                                                         class="inline-flex px-2 py-1 text-xs font-semibold rounded-full"
                                                         :class="getStatusClass(model.health_status)"
                                                         x-text="getStatusText(model.health_status)">
                                                     </span>
                                                 </td>
-                                                <td class="px-4 py-2 text-sm text-gray-900">
+                                                <td class="px-4 py-2 text-sm text-gray-900 whitespace-nowrap w-16">
                                                     <span x-text="(model.success_rate || 0).toFixed(1) + '%'"></span>
                                                 </td>
-                                                <td class="px-4 py-2 text-sm text-gray-900">
-                                                    <span
-                                                        x-text="Math.round(model.avg_response_time || 0) + 'ms'"></span>
+                                                <td class="px-4 py-2 text-sm text-gray-900 whitespace-nowrap w-20">
+                                                    <span x-text="Math.round(model.avg_response_time || 0) + 'ms'"></span>
                                                 </td>
-                                                <td class="px-4 py-2 text-sm text-gray-500">
+                                                <td class="px-4 py-2 text-sm text-gray-500 whitespace-nowrap w-32">
                                                     <span x-text="formatDateTime(model.last_check)"></span>
+                                                </td>
+                                                <td class="px-4 py-2 text-sm text-red-600 whitespace-nowrap w-1/4">
+                                                    <div class="truncate" :title="model.error_message || '-'">
+                                                        <span x-text="model.error_message || '-'"></span>
+                                                    </div>
+                                                </td>
+                                                <td class="px-4 py-2 whitespace-nowrap w-16">
+                                                    <button
+                                                        @click="deleteModel(selectedGroupId, model.model_name)"
+                                                        class="text-red-600 hover:text-red-800 text-sm font-medium px-2 py-1 rounded hover:bg-red-50"
+                                                        title="删除此模型">
+                                                        删除
+                                                    </button>
                                                 </td>
                                             </tr>
                                         </template>
@@ -635,7 +731,7 @@
                     </div>
 
                     <!-- 模态框底部 -->
-                    <div class="px-6 py-4 border-t border-gray-200 flex justify-end">
+                    <div class="px-6 py-4 border-t border-gray-200 flex justify-end flex-shrink-0">
                         <button @click="showGroupDetails = false"
                             class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-lg transition-colors">
                             关闭
@@ -655,8 +751,92 @@
                 </div>
             </div>
         </div>
+
+        <!-- 确认提示框模态框 -->
+        <div id="confirmModal" class="modal-overlay fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50 hidden">
+            <div class="relative min-h-screen flex items-center justify-center p-4">
+                <div class="modal-content relative bg-white rounded-lg shadow-xl max-w-md w-full mx-auto transform transition-all duration-300">
+                    <!-- 模态框头部 -->
+                    <div class="flex items-center justify-between p-6 border-b border-gray-200 modal-border">
+                        <h3 class="text-lg font-medium text-gray-900">确认操作</h3>
+                        <button type="button" class="text-gray-400 hover:text-gray-600 transition-colors" aria-label="关闭">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
+                        </button>
+                    </div>
+
+                    <!-- 模态框内容 -->
+                    <div class="p-6">
+                        <div class="flex items-center mb-4">
+                            <div class="modal-icon bg-yellow-100 rounded-full p-3 mr-4">
+                                <svg class="h-6 w-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                          d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16c-.77.833.192 2.5 1.732 2.5z">
+                                    </path>
+                                </svg>
+                            </div>
+                            <div>
+                                <p id="confirmMessage" class="text-gray-700 modal-text-secondary text-base leading-relaxed">确定要执行此操作吗？</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 模态框底部 -->
+                    <div class="px-6 py-4 border-t border-gray-200 modal-border flex justify-end space-x-3 modal-buttons">
+                        <button id="confirmNo"
+                                class="modal-button cancel-button px-4 py-2 text-white rounded-md text-base font-medium focus:outline-none focus:ring-2 focus:ring-gray-300">
+                            取消
+                        </button>
+                        <button id="confirmYes"
+                                class="modal-button confirm-button px-4 py-2 text-white rounded-md text-base font-medium focus:outline-none focus:ring-2 focus:ring-red-300">
+                            确认
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 消息提示框模态框 -->
+        <div id="alertModal" class="modal-overlay fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50 hidden">
+            <div class="relative min-h-screen flex items-center justify-center p-4">
+                <div class="modal-content relative bg-white rounded-lg shadow-xl max-w-md w-full mx-auto transform transition-all duration-300">
+                    <!-- 模态框头部 -->
+                    <div class="flex items-center justify-between p-6 border-b border-gray-200 modal-border">
+                        <h3 id="alertTitle" class="text-lg font-medium text-gray-900">提示</h3>
+                        <button type="button" class="text-gray-400 hover:text-gray-600 transition-colors" aria-label="关闭">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
+                        </button>
+                    </div>
+
+                    <!-- 模态框内容 -->
+                    <div class="p-6">
+                        <div class="flex items-center mb-4">
+                            <div id="alertIcon" class="modal-icon mr-4">
+                                <!-- 图标将通过JavaScript动态设置 -->
+                            </div>
+                            <div>
+                                <p id="alertMessage" class="text-gray-700 modal-text-secondary text-base leading-relaxed">这是一条提示消息</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 模态框底部 -->
+                    <div class="px-6 py-4 border-t border-gray-200 modal-border flex justify-end modal-buttons">
+                        <button id="alertOk"
+                                class="modal-button px-4 py-2 text-white text-base font-medium rounded-md w-20 focus:outline-none transition-colors bg-blue-500 hover:bg-blue-600 focus:ring-blue-300">
+                            确定
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
+    <!-- 引入模态框组件 -->
+    <script src="js/modal-components.js"></script>
     <script src="js/health-report.js"></script>
 </body>
 
