@@ -158,10 +158,8 @@ public class GeminiProvider : ILLMProvider
             }
 
             // 设置超时时间 - 从配置中读取Gemini专用超时设置，区分连接超时和响应超时
-            var connectionTimeoutSeconds = Math.Max(_configuration.GetValue<int>("OrchestrationApi:Gemini:ConnectionTimeout", 30), config.ConnectionTimeoutSeconds);
-            var responseTimeoutSeconds = isStreaming 
-                ? Math.Max(_configuration.GetValue<int>("OrchestrationApi:Gemini:StreamingTimeout", 300), config.ResponseTimeoutSeconds > 0 ? config.ResponseTimeoutSeconds : config.TimeoutSeconds)
-                : Math.Max(_configuration.GetValue<int>("OrchestrationApi:Gemini:NonStreamingTimeout", 180), config.ResponseTimeoutSeconds > 0 ? config.ResponseTimeoutSeconds : config.TimeoutSeconds);
+            var connectionTimeoutSeconds = Math.Max(config.ConnectionTimeoutSeconds, 30);
+            var responseTimeoutSeconds = config.ResponseTimeoutSeconds > 0 ? config.ResponseTimeoutSeconds : Math.Max(config.TimeoutSeconds, 30);
             using var responseTimeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(responseTimeoutSeconds));
             using var combinedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, responseTimeoutCts.Token);
 

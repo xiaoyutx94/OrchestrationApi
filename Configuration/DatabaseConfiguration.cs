@@ -283,20 +283,22 @@ public class DatabaseInitializer : IDatabaseInitializer
         {
             _logger.LogInformation("开始初始化种子数据...");
 
+            var authConfig = _configuration.GetSection("OrchestrationApi:Auth");
+            var username = authConfig.GetValue<string>("Username", "admin");
+
             // 检查是否已有管理员用户
             var adminUser = await _db.Queryable<User>()
-                .Where(u => u.Username == "admin")
+                .Where(u => u.Username == username)
                 .FirstAsync();
 
             if (adminUser == null)
             {
-                var authConfig = _configuration.GetSection("OrchestrationApi:Auth");
                 var password = authConfig.GetValue<string>("Password", "admin123");
                 var passwordHash = BCrypt.Net.BCrypt.HashPassword(password);
 
                 var newAdmin = new User
                 {
-                    Username = "admin",
+                    Username = username,
                     PasswordHash = passwordHash,
                     Role = "Admin",
                     Enabled = true,
@@ -305,7 +307,7 @@ public class DatabaseInitializer : IDatabaseInitializer
                 };
 
                 await _db.Insertable(newAdmin).ExecuteCommandAsync();
-                _logger.LogInformation("创建默认管理员用户: admin");
+                _logger.LogInformation("创建默认管理员用户: {Username}", username);
             }
             else
             {
@@ -314,7 +316,7 @@ public class DatabaseInitializer : IDatabaseInitializer
                 {
                     adminUser.Role = "Admin";
                     await _db.Updateable(adminUser).ExecuteCommandAsync();
-                    _logger.LogInformation("更新现有管理员用户角色: admin -> Admin");
+                    _logger.LogInformation("更新现有管理员用户角色: {Username} -> Admin", username);
                 }
             }
 

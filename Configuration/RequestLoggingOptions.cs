@@ -80,11 +80,6 @@ public class LogQueueOptions
     /// 优雅关闭超时时间（毫秒）
     /// </summary>
     public int GracefulShutdownTimeoutMs { get; set; } = 30000;
-
-    /// <summary>
-    /// 是否启用队列统计
-    /// </summary>
-    public bool EnableStatistics { get; set; } = true;
 }
 
 /// <summary>
