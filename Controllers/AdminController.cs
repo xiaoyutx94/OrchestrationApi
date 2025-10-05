@@ -193,6 +193,60 @@ public class AdminController : ControllerBase
     }
 
     /// <summary>
+    /// 获取日志筛选选项（所有唯一值）
+    /// </summary>
+    [HttpGet("logs/filter-options")]
+    public async Task<IActionResult> GetLogFilterOptions()
+    {
+        try
+        {
+            // 从数据库中获取所有日志的唯一筛选值 - 需要JOIN相关表
+
+            // 1. 获取代理密钥名称（从ProxyKey表）
+            var proxyKeys = await _db.Queryable<RequestLog>()
+                .LeftJoin<ProxyKey>((rl, pk) => rl.ProxyKeyId == pk.Id)
+                .Where((rl, pk) => !string.IsNullOrEmpty(pk.KeyName))
+                .GroupBy((rl, pk) => pk.KeyName)
+                .Select((rl, pk) => pk.KeyName)
+                .ToListAsync();
+
+            // 2. 获取Provider分组（构造和GetLogsDtoAsync相同格式的字符串）
+            var providerGroupsRaw = await _db.Queryable<RequestLog>()
+                .Where(log => !string.IsNullOrEmpty(log.ProviderType) || !string.IsNullOrEmpty(log.GroupId))
+                .Select(log => new { log.ProviderType, log.GroupId })
+                .ToListAsync();
+
+            var providerGroups = providerGroupsRaw
+                .Select(pg => $"{pg.ProviderType ?? "未知"} ({pg.GroupId ?? "无分组"})")
+                .Distinct()
+                .ToList();
+
+            // 3. 获取模型列表
+            var models = await _db.Queryable<RequestLog>()
+                .Where(log => !string.IsNullOrEmpty(log.Model))
+                .GroupBy(log => log.Model)
+                .Select(g => g.Model)
+                .ToListAsync();
+
+            return Ok(new
+            {
+                success = true,
+                filter_options = new
+                {
+                    proxy_keys = proxyKeys.OrderBy(k => k).ToList(),
+                    provider_groups = providerGroups.OrderBy(g => g).ToList(),
+                    models = models.OrderBy(m => m).ToList()
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "获取日志筛选选项时发生异常");
+            return BadRequest(new { success = false, error = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// 获取日志统计信息
     /// </summary>
     [HttpGet("logs/stats")]

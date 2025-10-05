@@ -528,15 +528,31 @@ public class RequestLogger : IRequestLogger
 
             if (!string.IsNullOrEmpty(proxyKeyFilter) && proxyKeyFilter != "所有密钥")
             {
-                if (int.TryParse(proxyKeyFilter, out int keyId))
-                {
-                    query = query.Where((rl, pk, gc) => rl.ProxyKeyId == keyId);
-                }
+                // 前端发送的是密钥名称字符串，使用JOIN的ProxyKey表匹配KeyName
+                query = query.Where((rl, pk, gc) => pk.KeyName == proxyKeyFilter);
             }
 
             if (!string.IsNullOrEmpty(groupFilter) && groupFilter != "所有分组")
             {
-                query = query.Where((rl, pk, gc) => rl.GroupId == groupFilter);
+                // 解析格式化的分组字符串: "ProviderType (GroupId)"
+                // 例如: "openai_responses (packycode_rp)" -> ProviderType="openai_responses", GroupId="packycode_rp"
+                var openParenIndex = groupFilter.IndexOf(" (");
+                var closeParenIndex = groupFilter.LastIndexOf(')');
+
+                if (openParenIndex > 0 && closeParenIndex > openParenIndex)
+                {
+                    var providerType = groupFilter.Substring(0, openParenIndex);
+                    var groupId = groupFilter.Substring(openParenIndex + 2, closeParenIndex - openParenIndex - 2);
+
+                    query = query.Where((rl, pk, gc) =>
+                        (rl.ProviderType == providerType || (string.IsNullOrEmpty(rl.ProviderType) && providerType == "未知")) &&
+                        (rl.GroupId == groupId || (string.IsNullOrEmpty(rl.GroupId) && groupId == "无分组")));
+                }
+                else
+                {
+                    // 如果格式不匹配，回退到直接匹配GroupId
+                    query = query.Where((rl, pk, gc) => rl.GroupId == groupFilter);
+                }
             }
 
             if (!string.IsNullOrEmpty(modelFilter) && modelFilter != "所有模型")
@@ -546,11 +562,12 @@ public class RequestLogger : IRequestLogger
 
             if (!string.IsNullOrEmpty(statusFilter) && statusFilter != "所有状态")
             {
-                if (statusFilter == "成功 (200)")
+                // 前端发送的是 "200" 或 "error"
+                if (statusFilter == "200")
                 {
                     query = query.Where((rl, pk, gc) => rl.StatusCode >= 200 && rl.StatusCode < 300);
                 }
-                else if (statusFilter == "错误 (非200)")
+                else if (statusFilter == "error")
                 {
                     query = query.Where((rl, pk, gc) => rl.StatusCode < 200 || rl.StatusCode >= 300);
                 }
@@ -558,11 +575,12 @@ public class RequestLogger : IRequestLogger
 
             if (!string.IsNullOrEmpty(typeFilter) && typeFilter != "所有类型")
             {
-                if (typeFilter == "流式")
+                // 前端发送的是 "true" 或 "false" 字符串
+                if (typeFilter == "true")
                 {
                     query = query.Where((rl, pk, gc) => rl.IsStreaming);
                 }
-                else if (typeFilter == "非流式")
+                else if (typeFilter == "false")
                 {
                     query = query.Where((rl, pk, gc) => !rl.IsStreaming);
                 }

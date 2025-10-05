@@ -195,6 +195,7 @@ function logsManagement() {
         },
 
         async init() {
+            await this.loadFilterOptions(); // 优先加载筛选选项
             await this.loadLogs();
             await this.loadStats();
             await this.loadTokenStats();
@@ -215,11 +216,11 @@ function logsManagement() {
                     offset: (this.currentPage - 1) * this.pageSize
                 });
 
-                if (this.filters.proxyKeyName) params.append('proxy_key_name', this.filters.proxyKeyName);
-                if (this.filters.providerGroup) params.append('provider_group', this.filters.providerGroup);
+                if (this.filters.proxyKeyName) params.append('proxyKey', this.filters.proxyKeyName);
+                if (this.filters.providerGroup) params.append('group', this.filters.providerGroup);
                 if (this.filters.model) params.append('model', this.filters.model);
                 if (this.filters.status) params.append('status', this.filters.status);
-                if (this.filters.stream) params.append('stream', this.filters.stream);
+                if (this.filters.stream) params.append('type', this.filters.stream);
 
                 const response = await fetch(`/admin/logs?${params}`);
                 const data = await response.json();
@@ -228,12 +229,30 @@ function logsManagement() {
                     this.logs = data.logs || [];
                     this.totalCount = data.total_count || 0;
                     this.selectedLogs = []; // 清空选中状态
-                    this.extractFilters();
+                    // 不再从当前页数据中提取筛选项
+                    // this.extractFilters(); // 已移除
                 } else {
                     console.error('Failed to load logs:', data.error);
                 }
             } catch (error) {
                 console.error('Error loading logs:', error);
+            }
+        },
+
+        async loadFilterOptions() {
+            try {
+                const response = await fetch('/admin/logs/filter-options');
+                const data = await response.json();
+
+                if (data.success) {
+                    this.proxyKeys = data.filter_options?.proxy_keys || [];
+                    this.providerGroups = data.filter_options?.provider_groups || [];
+                    this.models = data.filter_options?.models || [];
+                } else {
+                    console.error('Failed to load filter options:', data.error);
+                }
+            } catch (error) {
+                console.error('Error loading filter options:', error);
             }
         },
 
@@ -259,31 +278,33 @@ function logsManagement() {
             }
         },
 
-        extractFilters() {
-            const proxyKeys = new Set();
-            const providerGroups = new Set();
-            const models = new Set();
-
-            this.logs.forEach(log => {
-                if (log.proxy_key_name) {
-                    proxyKeys.add(log.proxy_key_name);
-                }
-                if (log.provider_group) {
-                    providerGroups.add(log.provider_group);
-                }
-                if (log.model) {
-                    models.add(log.model);
-                }
-            });
-
-            this.proxyKeys = Array.from(proxyKeys).sort();
-            this.providerGroups = Array.from(providerGroups).sort();
-            this.models = Array.from(models).sort();
-        },
+        // 已弃用：此方法仅从当前页提取筛选项，现在使用独立的API端点加载全局筛选选项
+        // extractFilters() {
+        //     const proxyKeys = new Set();
+        //     const providerGroups = new Set();
+        //     const models = new Set();
+        //
+        //     this.logs.forEach(log => {
+        //         if (log.proxy_key_name) {
+        //             proxyKeys.add(log.proxy_key_name);
+        //         }
+        //         if (log.provider_group) {
+        //             providerGroups.add(log.provider_group);
+        //         }
+        //         if (log.model) {
+        //             models.add(log.model);
+        //         }
+        //     });
+        //
+        //     this.proxyKeys = Array.from(proxyKeys).sort();
+        //     this.providerGroups = Array.from(providerGroups).sort();
+        //     this.models = Array.from(models).sort();
+        // },
 
         async applyFilters() {
             this.currentPage = 1;
             await this.loadLogs();
+            await this.loadStats();
             // 筛选条件变化时也需要更新图表
             setTimeout(async () => {
                 await this.updateCharts();
@@ -518,6 +539,7 @@ function logsManagement() {
                 if (data.success) {
                     await showAlert(`成功删除 ${data.deleted_count} 条日志`, 'success', '提示');
                     this.selectedLogs = [];
+                    await this.loadFilterOptions(); // 刷新筛选选项
                     this.loadLogs();
                     this.loadStats();
                 } else {
@@ -564,6 +586,7 @@ function logsManagement() {
                 if (data.success) {
                     await showAlert(data.message || '过期日志清理完成', 'success', '提示');
                     this.selectedLogs = [];
+                    await this.loadFilterOptions(); // 刷新筛选选项
                     this.loadLogs();
                     this.loadStats();
                 } else {
@@ -586,6 +609,7 @@ function logsManagement() {
                 if (data.success) {
                     await showAlert(`成功清空所有日志，删除了 ${data.deleted_count} 条记录`, 'success', '提示');
                     this.selectedLogs = [];
+                    await this.loadFilterOptions(); // 刷新筛选选项
                     this.loadLogs();
                     this.loadStats();
                 } else {
@@ -608,6 +632,7 @@ function logsManagement() {
                 if (data.success) {
                     await showAlert(`成功清空错误日志，删除了 ${data.deleted_count} 条记录`, 'success', '提示');
                     this.selectedLogs = [];
+                    await this.loadFilterOptions(); // 刷新筛选选项
                     this.loadLogs();
                     this.loadStats();
                 } else {
@@ -623,11 +648,11 @@ function logsManagement() {
         async exportLogs() {
             try {
                 const params = new URLSearchParams();
-                if (this.filters.proxyKeyName) params.append('proxy_key_name', this.filters.proxyKeyName);
-                if (this.filters.providerGroup) params.append('provider_group', this.filters.providerGroup);
+                if (this.filters.proxyKeyName) params.append('proxyKey', this.filters.proxyKeyName);
+                if (this.filters.providerGroup) params.append('group', this.filters.providerGroup);
                 if (this.filters.model) params.append('model', this.filters.model);
                 if (this.filters.status) params.append('status', this.filters.status);
-                if (this.filters.stream) params.append('stream', this.filters.stream);
+                if (this.filters.stream) params.append('type', this.filters.stream);
                 params.append('format', 'csv');
 
                 const url = `/admin/logs/export?${params}`;
@@ -827,10 +852,10 @@ function logsManagement() {
             try {
                 const params = new URLSearchParams();
                 if (this.chartTimeRange) params.append('range', this.chartTimeRange);
-                if (this.filters.proxyKeyName) params.append('proxy_key_name', this.filters.proxyKeyName);
-                if (this.filters.providerGroup) params.append('provider_group', this.filters.providerGroup);
+                if (this.filters.proxyKeyName) params.append('proxyKey', this.filters.proxyKeyName);
+                if (this.filters.providerGroup) params.append('group', this.filters.providerGroup);
                 if (this.filters.model) params.append('model', this.filters.model);
-                if (this.filters.stream) params.append('stream', this.filters.stream);
+                if (this.filters.stream) params.append('type', this.filters.stream);
 
                 const response = await fetch(`/admin/logs/stats/status?${params}`);
                 const result = await response.json();
@@ -894,10 +919,10 @@ function logsManagement() {
             try {
                 const params = new URLSearchParams();
                 if (this.chartTimeRange) params.append('range', this.chartTimeRange);
-                if (this.filters.proxyKeyName) params.append('proxy_key_name', this.filters.proxyKeyName);
-                if (this.filters.providerGroup) params.append('provider_group', this.filters.providerGroup);
+                if (this.filters.proxyKeyName) params.append('proxyKey', this.filters.proxyKeyName);
+                if (this.filters.providerGroup) params.append('group', this.filters.providerGroup);
                 if (this.filters.model) params.append('model', this.filters.model);
-                if (this.filters.stream) params.append('stream', this.filters.stream);
+                if (this.filters.stream) params.append('type', this.filters.stream);
 
                 const response = await fetch(`/admin/logs/stats/models?${params}`);
                 const result = await response.json();
@@ -981,10 +1006,10 @@ function logsManagement() {
             try {
                 const params = new URLSearchParams();
                 if (this.chartTimeRange) params.append('range', this.chartTimeRange);
-                if (this.filters.proxyKeyName) params.append('proxy_key_name', this.filters.proxyKeyName);
-                if (this.filters.providerGroup) params.append('provider_group', this.filters.providerGroup);
+                if (this.filters.proxyKeyName) params.append('proxyKey', this.filters.proxyKeyName);
+                if (this.filters.providerGroup) params.append('group', this.filters.providerGroup);
                 if (this.filters.model) params.append('model', this.filters.model);
-                if (this.filters.stream) params.append('stream', this.filters.stream);
+                if (this.filters.stream) params.append('type', this.filters.stream);
 
                 const response = await fetch(`/admin/logs/stats/tokens-timeline?${params}`);
                 const result = await response.json();
@@ -1134,10 +1159,10 @@ function logsManagement() {
                 // 构建查询参数
                 const params = new URLSearchParams();
                 if (this.chartTimeRange) params.append('range', this.chartTimeRange);
-                if (this.filters.proxyKeyName) params.append('proxy_key_name', this.filters.proxyKeyName);
-                if (this.filters.providerGroup) params.append('provider_group', this.filters.providerGroup);
+                if (this.filters.proxyKeyName) params.append('proxyKey', this.filters.proxyKeyName);
+                if (this.filters.providerGroup) params.append('group', this.filters.providerGroup);
                 if (this.filters.model) params.append('model', this.filters.model);
-                if (this.filters.stream) params.append('stream', this.filters.stream);
+                if (this.filters.stream) params.append('type', this.filters.stream);
 
                 const response = await fetch(`/admin/logs/stats/status?${params}`);
                 const result = await response.json();
@@ -1211,10 +1236,10 @@ function logsManagement() {
                 // 构建查询参数
                 const params = new URLSearchParams();
                 if (this.chartTimeRange) params.append('range', this.chartTimeRange);
-                if (this.filters.proxyKeyName) params.append('proxy_key_name', this.filters.proxyKeyName);
-                if (this.filters.providerGroup) params.append('provider_group', this.filters.providerGroup);
+                if (this.filters.proxyKeyName) params.append('proxyKey', this.filters.proxyKeyName);
+                if (this.filters.providerGroup) params.append('group', this.filters.providerGroup);
                 if (this.filters.model) params.append('model', this.filters.model);
-                if (this.filters.stream) params.append('stream', this.filters.stream);
+                if (this.filters.stream) params.append('type', this.filters.stream);
 
                 const response = await fetch(`/admin/logs/stats/models?${params}`);
                 const result = await response.json();
@@ -1323,10 +1348,10 @@ function logsManagement() {
                 // 构建查询参数
                 const params = new URLSearchParams();
                 if (this.chartTimeRange) params.append('range', this.chartTimeRange);
-                if (this.filters.proxyKeyName) params.append('proxy_key_name', this.filters.proxyKeyName);
-                if (this.filters.providerGroup) params.append('provider_group', this.filters.providerGroup);
+                if (this.filters.proxyKeyName) params.append('proxyKey', this.filters.proxyKeyName);
+                if (this.filters.providerGroup) params.append('group', this.filters.providerGroup);
                 if (this.filters.model) params.append('model', this.filters.model);
-                if (this.filters.stream) params.append('stream', this.filters.stream);
+                if (this.filters.stream) params.append('type', this.filters.stream);
 
                 const response = await fetch(`/admin/logs/stats/tokens-timeline?${params}`);
                 const result = await response.json();
@@ -1411,10 +1436,10 @@ function logsManagement() {
                 // 构建查询参数
                 const params = new URLSearchParams();
                 if (this.chartTimeRange) params.append('range', this.chartTimeRange);
-                if (this.filters.proxyKeyName) params.append('proxy_key_name', this.filters.proxyKeyName);
-                if (this.filters.providerGroup) params.append('provider_group', this.filters.providerGroup);
+                if (this.filters.proxyKeyName) params.append('proxyKey', this.filters.proxyKeyName);
+                if (this.filters.providerGroup) params.append('group', this.filters.providerGroup);
                 if (this.filters.model) params.append('model', this.filters.model);
-                if (this.filters.stream) params.append('stream', this.filters.stream);
+                if (this.filters.stream) params.append('type', this.filters.stream);
 
                 const response = await fetch(`/admin/logs/stats/group-tokens?${params}`);
                 const result = await response.json();
