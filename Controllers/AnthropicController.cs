@@ -44,11 +44,11 @@ public class AnthropicController : ControllerBase
                 rawJsonBody = await reader.ReadToEndAsync();
             }
 
-            // 手动反序列化请求对象
-            AnthropicMessageRequest request;
+            // 验证JSON格式（用于日志提取信息）
+            Dictionary<string, object>? requestDict = null;
             try
             {
-                request = JsonConvert.DeserializeObject<AnthropicMessageRequest>(rawJsonBody)
+                requestDict = JsonConvert.DeserializeObject<Dictionary<string, object>>(rawJsonBody)
                     ?? throw new ArgumentException("Invalid JSON format");
             }
             catch (JsonException ex)
@@ -81,12 +81,16 @@ public class AnthropicController : ControllerBase
             var clientIp = HttpContext.Connection.RemoteIpAddress?.ToString();
             var userAgent = httpRequest.Headers.UserAgent.FirstOrDefault();
 
-            _logger.LogDebug("接收到Anthropic原生消息请求 - Model: {Model}, Stream: {Stream}, ProxyKey: {ProxyKey}，原始请求：{RawRequest}",
-                request.Model, request.Stream, string.IsNullOrEmpty(proxyKey) ? "无" : "已提供", rawJsonBody);
+            // 从字典提取用于日志的信息
+            var model = requestDict.TryGetValue("model", out var modelVal) ? modelVal?.ToString() : "unknown";
+            var stream = requestDict.TryGetValue("stream", out var streamVal) && streamVal is bool s && s;
 
-            // 使用Anthropic原生HTTP代理
+            _logger.LogDebug("接收到Anthropic原生消息请求 - Model: {Model}, Stream: {Stream}, ProxyKey: {ProxyKey}，原始请求：{RawRequest}",
+                model, stream, string.IsNullOrEmpty(proxyKey) ? "无" : "已提供", rawJsonBody);
+
+            // 使用Anthropic原生HTTP代理（JSON透传模式）
             var httpResponse = await _multiProviderService.ProcessAnthropicRequestAsync(
-                request, proxyKey, clientIp, userAgent, httpRequest.Path, HttpContext.RequestAborted);
+                rawJsonBody, proxyKey, clientIp, userAgent, httpRequest.Path, HttpContext.RequestAborted);
 
             if (!httpResponse.IsSuccess)
             {
@@ -103,7 +107,7 @@ public class AnthropicController : ControllerBase
                 });
             }
 
-            if (request.Stream && httpResponse.ResponseStream != null)
+            if (stream && httpResponse.ResponseStream != null)
             {
                 // 透明流式响应
                 _logger.LogDebug("返回Anthropic原生流式响应");

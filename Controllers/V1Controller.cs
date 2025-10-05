@@ -57,12 +57,10 @@ public class V1Controller : ControllerBase
                 rawJsonBody = await reader.ReadToEndAsync();
             }
 
-            // 手动反序列化请求对象
-            ChatCompletionRequest request;
+            // 验证JSON格式（不反序列化为实体类）
             try
             {
-                request = JsonConvert.DeserializeObject<ChatCompletionRequest>(rawJsonBody)
-                    ?? throw new ArgumentException("Invalid JSON format");
+                JsonConvert.DeserializeObject<object>(rawJsonBody);
             }
             catch (JsonException ex)
             {
@@ -95,12 +93,12 @@ public class V1Controller : ControllerBase
             // 根据请求路径动态确定provider类型
             var providerType = GetProviderTypeFromPath(httpRequest.Path);
 
-            _logger.LogDebug("接收到聊天完成请求 - Model: {Model}, Stream: {Stream}, ProxyKey: {ProxyKey}, ProviderType: {ProviderType}，原始请求：{RawRequest}",
-                request.Model, request.Stream, string.IsNullOrEmpty(proxyKey) ? "无" : "已提供", providerType, rawJsonBody);
+            _logger.LogDebug("接收到聊天完成请求 - ProxyKey: {ProxyKey}, ProviderType: {ProviderType}，原始请求：{RawRequest}",
+                string.IsNullOrEmpty(proxyKey) ? "无" : "已提供", providerType, rawJsonBody);
 
-            // 使用透明HTTP代理（内部会进行模型验证和路由）
+            // 使用透明HTTP代理（直接传递JSON字符串，内部会进行模型验证和路由）
             var httpResponse = await _multiProviderService.ProcessChatCompletionHttpAsync(
-                request, proxyKey, providerType, clientIp, userAgent, httpRequest.Path, HttpContext.RequestAborted);
+                rawJsonBody, proxyKey, providerType, clientIp, userAgent, httpRequest.Path, HttpContext.RequestAborted);
 
             if (!httpResponse.IsSuccess)
             {
@@ -117,7 +115,22 @@ public class V1Controller : ControllerBase
                 });
             }
 
-            if (request.Stream && httpResponse.ResponseStream != null)
+            // 判断是否为流式请求（从JSON中提取）
+            var isStreamRequest = false;
+            try
+            {
+                var requestDict = JsonConvert.DeserializeObject<Dictionary<string, object>>(rawJsonBody);
+                if (requestDict?.ContainsKey("stream") == true)
+                {
+                    isStreamRequest = Convert.ToBoolean(requestDict["stream"]);
+                }
+            }
+            catch
+            {
+                // 忽略解析错误，默认非流式
+            }
+
+            if (isStreamRequest && httpResponse.ResponseStream != null)
             {
                 // 透明流式响应
                 _logger.LogDebug("返回透明流式响应");

@@ -1930,27 +1930,27 @@ public class KeyManager : IKeyManager
                 Headers = groupHeaders  // 添加分组配置的请求头
             };
 
-            // 创建 Gemini 原生格式的测试请求
-            var geminiTestRequest = new GeminiGenerateContentRequest
+            // 创建 Gemini 原生格式的测试请求（使用字典构建）
+            var geminiTestRequest = new Dictionary<string, object>
             {
-                Contents = new List<GeminiContent>
+                ["contents"] = new List<Dictionary<string, object>>
                 {
-                    new GeminiContent
+                    new Dictionary<string, object>
                     {
-                        Role = "user",
-                        Parts = new List<GeminiPart>
+                        ["role"] = "user",
+                        ["parts"] = new List<Dictionary<string, object>>
                         {
-                            new GeminiPart { Text = "Hi" }
+                            new Dictionary<string, object> { ["text"] = "Hi" }
                         }
                     }
                 },
-                GenerationConfig = new GeminiGenerationConfig
+                ["generationConfig"] = new Dictionary<string, object>
                 {
-                    MaxOutputTokens = 1,  // 限制响应长度
-                    Temperature = 0.0f,    // 确保响应一致性
-                    ThinkingConfig = new GeminiThinkingConfig()
+                    ["maxOutputTokens"] = 1,
+                    ["temperature"] = 0.0,
+                    ["thinkingConfig"] = new Dictionary<string, object>
                     {
-                        ThinkingBudget = 0
+                        ["thinkingBudget"] = 0
                     }
                 }
             };
@@ -1961,8 +1961,9 @@ public class KeyManager : IKeyManager
             // 检查 provider 是否为 GeminiProvider 并支持原生请求格式
             if (provider is GeminiProvider geminiProvider)
             {
-                // 使用 Gemini 原生请求格式
-                var httpContent = await geminiProvider.PrepareRequestContentAsync(geminiTestRequest, providerConfig, cts.Token);
+                // 序列化为JSON并使用JSON透传方法
+                var geminiTestJson = JsonConvert.SerializeObject(geminiTestRequest);
+                var httpContent = await geminiProvider.PrepareRequestContentFromJsonAsync(geminiTestJson, providerConfig, cts.Token);
                 var httpResponse = await geminiProvider.SendHttpRequestAsync(httpContent, apiKey, providerConfig, false, cts.Token);
 
                 return new KeyValidationResult

@@ -45,11 +45,11 @@ public class GeminiController : ControllerBase
                 rawJsonBody = await reader.ReadToEndAsync();
             }
 
-            // 手动反序列化请求对象
-            GeminiGenerateContentRequest request;
+            // 验证JSON格式并设置model参数
+            Dictionary<string, object> requestDict;
             try
             {
-                request = JsonConvert.DeserializeObject<GeminiGenerateContentRequest>(rawJsonBody)
+                requestDict = JsonConvert.DeserializeObject<Dictionary<string, object>>(rawJsonBody)
                     ?? throw new ArgumentException("Invalid JSON format");
             }
             catch (JsonException ex)
@@ -84,11 +84,13 @@ public class GeminiController : ControllerBase
             _logger.LogDebug("接收到Gemini生成内容请求 - Model: {Model}, ProxyKey: {ProxyKey}，原始请求：{RawRequest}",
                 model, string.IsNullOrEmpty(proxyKey) ? "无" : "已提供", rawJsonBody);
 
-            request.Model = model;
+            // 设置model参数到请求字典
+            requestDict["model"] = model;
+            var modifiedRequestJson = JsonConvert.SerializeObject(requestDict);
 
-            // 使用Gemini专用HTTP代理
+            // 使用Gemini专用HTTP代理（JSON透传模式）
             var httpResponse = await _multiProviderService.ProcessGeminiHttpRequestAsync(
-                request, false, proxyKey, _providerType, clientIp, userAgent,
+                modifiedRequestJson, false, proxyKey, _providerType, clientIp, userAgent,
                 httpRequest.Path, HttpContext.RequestAborted);
 
             if (!httpResponse.IsSuccess)
@@ -172,11 +174,11 @@ public class GeminiController : ControllerBase
                 rawJsonBody = await reader.ReadToEndAsync();
             }
 
-            // 手动反序列化请求对象
-            GeminiGenerateContentRequest request;
+            // 验证JSON格式并设置model参数
+            Dictionary<string, object> requestDict;
             try
             {
-                request = JsonConvert.DeserializeObject<GeminiGenerateContentRequest>(rawJsonBody)
+                requestDict = JsonConvert.DeserializeObject<Dictionary<string, object>>(rawJsonBody)
                     ?? throw new ArgumentException("Invalid JSON format");
             }
             catch (JsonException ex)
@@ -211,11 +213,13 @@ public class GeminiController : ControllerBase
             _logger.LogDebug("接收到Gemini流式生成内容请求 - Model: {Model}, ProxyKey: {ProxyKey}，原始请求：{RawRequest}",
                 model, string.IsNullOrEmpty(proxyKey) ? "无" : "已提供", rawJsonBody);
 
-            request.Model = model;
+            // 设置model参数到请求字典
+            requestDict["model"] = model;
+            var modifiedRequestJson = JsonConvert.SerializeObject(requestDict);
 
-            // 使用Gemini专用HTTP代理，启用流式
+            // 使用Gemini专用HTTP代理，启用流式（JSON透传模式）
             var httpResponse = await _multiProviderService.ProcessGeminiHttpRequestAsync(
-                request, true, proxyKey, _providerType, clientIp, userAgent,
+                modifiedRequestJson, true, proxyKey, _providerType, clientIp, userAgent,
                 httpRequest.Path, HttpContext.RequestAborted);
 
             if (!httpResponse.IsSuccess)

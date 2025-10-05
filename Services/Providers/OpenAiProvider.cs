@@ -240,6 +240,19 @@ public class OpenAiProvider : ILLMProvider
     }
 
     /// <summary>
+    /// 从JSON字符串准备HTTP请求内容（用于透明代理模式）
+    /// </summary>
+    public Task<HttpContent> PrepareRequestContentFromJsonAsync(
+        string requestJson,
+        ProviderConfig config,
+        CancellationToken cancellationToken = default)
+    {
+        // OpenAI使用标准JSON格式，直接透传
+        // 注意：假流模式已在调用层处理，这里不需要特殊处理
+        return Task.FromResult<HttpContent>(new StringContent(requestJson, Encoding.UTF8, "application/json"));
+    }
+
+    /// <summary>
     /// 准备HTTP请求头
     /// </summary>
     /// <param name="apiKey">API密钥</param>

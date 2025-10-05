@@ -65,19 +65,30 @@ public class GeminiProvider : ILLMProvider
         return Task.FromResult<HttpContent>(content);
     }
 
-    public Task<HttpContent> PrepareRequestContentAsync(
-        GeminiGenerateContentRequest request,
+    /// <summary>
+    /// 从JSON字符串准备HTTP请求内容（用于透明代理模式）
+    /// </summary>
+    public Task<HttpContent> PrepareRequestContentFromJsonAsync(
+        string requestJson,
         ProviderConfig config,
         CancellationToken cancellationToken = default)
     {
-        // 对于Gemini原生请求，直接序列化
-        var jsonContent = JsonConvert.SerializeObject(request, new JsonSerializerSettings
+        // Gemini JSON透传模式：直接使用字典操作，避免反序列化为实体类
+        var requestDict = JsonConvert.DeserializeObject<Dictionary<string, object>>(requestJson)
+            ?? throw new ArgumentException("Invalid JSON format");
+
+        // 应用参数覆盖
+        foreach (var (key, value) in config.ParameterOverrides)
+        {
+            requestDict[key] = value;
+        }
+
+        var jsonContent = JsonConvert.SerializeObject(requestDict, new JsonSerializerSettings
         {
             NullValueHandling = NullValueHandling.Ignore
         });
 
-        var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
-        return Task.FromResult<HttpContent>(content);
+        return Task.FromResult<HttpContent>(new StringContent(jsonContent, Encoding.UTF8, "application/json"));
     }
 
     public Dictionary<string, string> PrepareRequestHeaders(string apiKey, ProviderConfig config)
@@ -447,26 +458,35 @@ public class GeminiProvider : ILLMProvider
     {
         try
         {
-            var testRequest = new GeminiGenerateContentRequest
+            // 使用字典创建简单的测试请求
+            var testRequestDict = new Dictionary<string, object>
             {
-                Contents = new List<GeminiContent>
+                ["contents"] = new List<Dictionary<string, object>>
                 {
-                    new GeminiContent
+                    new Dictionary<string, object>
                     {
-                        Role = "user",
-                        Parts = new List<GeminiPart> { new GeminiPart { Text = "Hi" } }
+                        ["role"] = "user",
+                        ["parts"] = new List<Dictionary<string, object>>
+                        {
+                            new Dictionary<string, object> { ["text"] = "Hi" }
+                        }
                     }
                 }
             };
 
-            var content = await PrepareRequestContentAsync(testRequest, config, cancellationToken);
+            var jsonContent = JsonConvert.SerializeObject(testRequestDict, new JsonSerializerSettings
+            {
+                NullValueHandling = NullValueHandling.Ignore
+            });
+
+            var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
             var response = await SendHttpRequestAsync(content, apiKey, config, false, cancellationToken);
 
             return response.IsSuccess;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "验证 Gemini API 密钥失败, 分组: {GroupId}({GroupName})", 
+            _logger.LogWarning(ex, "验证 Gemini API 密钥失败, 分组: {GroupId}({GroupName})",
                 config.GroupId ?? "未知", config.GroupName ?? "未知");
             return false;
         }
@@ -502,41 +522,52 @@ public class GeminiProvider : ILLMProvider
     }
 
     /// <summary>
-    /// 将ChatCompletionRequest转换为Gemini格式
+    /// 将ChatCompletionRequest转换为Gemini格式（使用字典直接透传）
     /// </summary>
-    private GeminiGenerateContentRequest ConvertToGeminiRequest(ChatCompletionRequest request, ProviderConfig config)
+    private Dictionary<string, object> ConvertToGeminiRequest(ChatCompletionRequest request, ProviderConfig config)
     {
-        var geminiRequest = new GeminiGenerateContentRequest
-        {
-            Contents = new List<GeminiContent>()
-        };
+        var contents = new List<Dictionary<string, object>>();
 
         foreach (var message in request.Messages)
         {
-            var content = new GeminiContent
+            var content = new Dictionary<string, object>
             {
-                Role = message.Role == "assistant" ? "model" : message.Role,
-                Parts = new List<GeminiPart>()
+                ["role"] = message.Role == "assistant" ? "model" : message.Role,
+                ["parts"] = new List<Dictionary<string, object>>()
             };
 
             if (message.Content != null)
             {
                 var textContent = message.Content.ToString() ?? "";
-                content.Parts.Add(new GeminiPart { Text = textContent });
+                ((List<Dictionary<string, object>>)content["parts"]).Add(new Dictionary<string, object>
+                {
+                    ["text"] = textContent
+                });
             }
 
-            geminiRequest.Contents.Add(content);
+            contents.Add(content);
         }
+
+        var geminiRequest = new Dictionary<string, object>
+        {
+            ["contents"] = contents
+        };
 
         // 设置生成配置
         if (request.Temperature.HasValue || request.TopP.HasValue || request.MaxTokens.HasValue)
         {
-            geminiRequest.GenerationConfig = new GeminiGenerationConfig
-            {
-                Temperature = request.Temperature,
-                TopP = request.TopP,
-                MaxOutputTokens = request.MaxTokens
-            };
+            var generationConfig = new Dictionary<string, object>();
+            
+            if (request.Temperature.HasValue)
+                generationConfig["temperature"] = request.Temperature.Value;
+            
+            if (request.TopP.HasValue)
+                generationConfig["topP"] = request.TopP.Value;
+            
+            if (request.MaxTokens.HasValue)
+                generationConfig["maxOutputTokens"] = request.MaxTokens.Value;
+
+            geminiRequest["generationConfig"] = generationConfig;
         }
 
         return geminiRequest;

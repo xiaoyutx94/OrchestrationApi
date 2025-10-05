@@ -182,7 +182,13 @@ public interface ILLMProvider
         ProviderConfig config,
         CancellationToken cancellationToken = default);
 
-
+    /// <summary>
+    /// 从JSON字符串准备HTTP请求内容（用于透明代理模式）
+    /// </summary>
+    Task<HttpContent> PrepareRequestContentFromJsonAsync(
+        string requestJson,
+        ProviderConfig config,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 准备HTTP请求头

@@ -40,7 +40,7 @@ public interface IMultiProviderService
     /// <summary>
     /// 处理聊天完成HTTP请求（透明代理模式）
     /// </summary>
-    /// <param name="request">聊天完成请求</param>
+    /// <param name="requestJson">聊天完成请求的JSON字符串</param>
     /// <param name="proxyKey">代理密钥</param>
     /// <param name="providerType">服务商类型</param>
     /// <param name="clientIp">客户端IP</param>
@@ -49,7 +49,7 @@ public interface IMultiProviderService
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>HTTP响应</returns>
     Task<ProviderHttpResponse> ProcessChatCompletionHttpAsync(
-        ChatCompletionRequest request,
+        string requestJson,
         string proxyKey,
         string providerType,
         string? clientIp = null,
@@ -70,7 +70,7 @@ public interface IMultiProviderService
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>HTTP响应</returns>
     Task<ProviderHttpResponse> ProcessGeminiHttpRequestAsync(
-        GeminiGenerateContentRequest request,
+        string requestJson,
         bool isStreamRequest,
         string proxyKey,
         string providerType,
@@ -103,8 +103,9 @@ public interface IMultiProviderService
     /// <param name="endpoint">请求路径</param>
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>HTTP响应</returns>
+    /// <returns>HTTP响应</returns>
     Task<ProviderHttpResponse> ProcessAnthropicRequestAsync(
-        AnthropicMessageRequest request,
+        string requestJson,
         string proxyKey,
         string? clientIp = null,
         string? userAgent = null,
@@ -901,40 +902,16 @@ public class MultiProviderService : IMultiProviderService
     }
 
     /// <summary>
-    /// 应用参数覆盖
+    /// 应用参数覆盖到请求字典（用于JSON透传模式）
     /// </summary>
-    /// <param name="request">Gemini请求</param>
-    /// <param name="overrides">参数覆盖</param>
-    private static void ApplyParameterOverrides(GeminiGenerateContentRequest request, Dictionary<string, object> overrides)
+    /// <param name="requestDict">请求参数字典</param>
+    /// <param name="overrides">需要覆盖的参数</param>
+    private static void ApplyParameterOverridesToDict(Dictionary<string, object> requestDict, Dictionary<string, object> overrides)
     {
         foreach (var (key, value) in overrides)
         {
-            switch (key.ToLower())
-            {
-                case "temperature":
-                    if (value is double temp)
-                    {
-                        request.GenerationConfig ??= new GeminiGenerationConfig();
-                        request.GenerationConfig.Temperature = (float)temp;
-                    }
-                    break;
-
-                case "max_tokens":
-                    if (value is int maxTokens)
-                    {
-                        request.GenerationConfig ??= new GeminiGenerationConfig();
-                        request.GenerationConfig.MaxOutputTokens = maxTokens;
-                    }
-                    break;
-
-                case "top_p":
-                    if (value is double topP)
-                    {
-                        request.GenerationConfig ??= new GeminiGenerationConfig();
-                        request.GenerationConfig.TopP = (float)topP;
-                    }
-                    break;
-            }
+            // 直接设置字典键值，自动覆盖原有值
+            requestDict[key] = value;
         }
     }
 
@@ -1068,7 +1045,7 @@ public class MultiProviderService : IMultiProviderService
     /// <summary>
     /// 处理HTTP透明代理聊天完成请求
     /// </summary>
-    /// <param name="request">聊天完成请求</param>
+    /// <param name="requestJson">聊天完成请求的JSON字符串</param>
     /// <param name="proxyKey">代理密钥</param>
     /// <param name="providerType">服务商类型</param>
     /// <param name="clientIp">客户端IP</param>
@@ -1077,7 +1054,7 @@ public class MultiProviderService : IMultiProviderService
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>HTTP响应</returns>
     public async Task<ProviderHttpResponse> ProcessChatCompletionHttpAsync(
-        ChatCompletionRequest request,
+        string requestJson,
         string proxyKey,
         string providerType,
         string? clientIp = null,
@@ -1085,6 +1062,32 @@ public class MultiProviderService : IMultiProviderService
         string? endpoint = null,
         CancellationToken cancellationToken = default)
     {
+        // 解析JSON为字典以便灵活操作
+        Dictionary<string, object>? requestDict;
+        try
+        {
+            requestDict = JsonConvert.DeserializeObject<Dictionary<string, object>>(requestJson);
+            if (requestDict == null)
+            {
+                throw new ArgumentException("Invalid JSON format");
+            }
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogError(ex, "解析请求JSON失败");
+            return new ProviderHttpResponse
+            {
+                StatusCode = 400,
+                IsSuccess = false,
+                ErrorMessage = $"Invalid JSON format: {ex.Message}"
+            };
+        }
+
+        // 从字典中提取必要的字段
+        var originalModelName = requestDict.ContainsKey("model") ? requestDict["model"]?.ToString() ?? string.Empty : string.Empty;
+        var isStreamRequest = requestDict.ContainsKey("stream") && Convert.ToBoolean(requestDict["stream"]);
+        var hasTools = requestDict.ContainsKey("tools") && requestDict["tools"] != null;
+
         // 获取代理密钥ID
         int? proxyKeyId = null;
         if (!string.IsNullOrEmpty(proxyKey))
@@ -1093,14 +1096,11 @@ public class MultiProviderService : IMultiProviderService
             proxyKeyId = validatedProxyKey?.Id;
         }
 
-        // 保存原始模型名称用于日志记录
-        var originalModelName = request.Model;
-
         // 记录请求开始
         var requestId = await _requestLogger.LogRequestStartAsync(
             "POST",
             endpoint,
-            JsonConvert.SerializeObject(request),
+            requestJson, // 直接使用原始JSON字符串
             null, // headers will be added later if needed
             proxyKeyId,
             clientIp,
@@ -1109,7 +1109,7 @@ public class MultiProviderService : IMultiProviderService
         try
         {
             _logger.LogInformation("开始处理HTTP透明代理聊天完成请求 - RequestId: {RequestId}, Model: {Model}",
-                requestId, request.Model);
+                requestId, originalModelName);
 
             // 获取最大服务商重试个数配置
             var maxProviderRetries = _configuration.GetValue<int>("OrchestrationApi:Global:MaxProviderRetries", 3);
@@ -1152,16 +1152,21 @@ public class MultiProviderService : IMultiProviderService
                     _logger.LogDebug("RequestId: {RequestId}, 尝试服务商 {ProviderType} (分组: {GroupId}) - 第 {AttemptNumber} 次",
                         requestId, routeResult.Group.ProviderType, routeResult.Group.Id, providerAttempt + 1);
 
-                    // 应用参数覆盖
-                    ApplyParameterOverrides(request, routeResult.ParameterOverrides);
-                    request.Model = routeResult.ResolvedModel;
+                    // 应用参数覆盖（直接操作字典）
+                    ApplyParameterOverridesToDict(requestDict, routeResult.ParameterOverrides);
+                    
+                    // 更新模型名称
+                    requestDict["model"] = routeResult.ResolvedModel;
 
                     // 获取服务商实例
                     var provider = _providerFactory.GetProvider(routeResult.Group.ProviderType);
                     var providerConfig = BuildProviderConfig(routeResult);
 
-                    // 准备HTTP请求内容
-                    var httpContent = await provider.PrepareRequestContentAsync(request, providerConfig, cancellationToken);
+                    // 将修改后的字典序列化为JSON字符串
+                    var modifiedRequestJson = JsonConvert.SerializeObject(requestDict);
+
+                    // 准备HTTP请求内容（Provider需要支持接收JSON字符串）
+                    var httpContent = await provider.PrepareRequestContentFromJsonAsync(modifiedRequestJson, providerConfig, cancellationToken);
 
                     // 使用统一的重试策略（移除内部重试循环）
                     var maxRetries = routeResult.Group.RetryCount;
@@ -1194,7 +1199,7 @@ public class MultiProviderService : IMultiProviderService
 
                             // 发送HTTP请求（Provider不再包含重试逻辑）
                             // 注意：这里不能直接传入request.Stream，因为假流模式需要发送非流式请求到上游
-                            var actualIsStreaming = providerConfig.FakeStreaming ? false : request.Stream;
+                            var actualIsStreaming = providerConfig.FakeStreaming ? false : isStreamRequest;
                             var response = await provider.SendHttpRequestAsync(
                                 httpContent, currentApiKey!, providerConfig, actualIsStreaming, cancellationToken);
 
@@ -1228,8 +1233,8 @@ public class MultiProviderService : IMultiProviderService
                                     routeResult.Group.Id,
                                     routeResult.Group.ProviderType,
                                     originalModelName, // 使用原始模型名称
-                                    request.Tools?.Any() == true,
-                                    request.Stream,
+                                    hasTools,
+                                    isStreamRequest,
                                     currentApiKey);
 
                                 _logger.LogInformation("HTTP透明代理请求成功 - RequestId: {RequestId}, 服务商: {ProviderType}, 尝试次数: {Attempt}",
@@ -1262,9 +1267,9 @@ public class MultiProviderService : IMultiProviderService
                                         null, null, null, // token信息在HTTP透明代理模式下无法准确获取
                                         routeResult.Group.Id,
                                         routeResult.Group.ProviderType,
-                                        request.Model,
-                                        request.Tools?.Any() == true,
-                                        request.Stream,
+                                        originalModelName,
+                                        hasTools,
+                                        isStreamRequest,
                                         currentApiKey);
 
                                     // 不可重试的错误，直接返回
@@ -1357,8 +1362,8 @@ public class MultiProviderService : IMultiProviderService
                 null, // no group id available since all providers failed
                 null, // no provider type available
                 originalModelName, // 使用原始模型名称
-                request.Tools?.Any() == true,
-                request.Stream,
+                hasTools,
+                isStreamRequest,
                 null); // no openrouter key available since all providers failed
 
             return new ProviderHttpResponse
@@ -1381,8 +1386,8 @@ public class MultiProviderService : IMultiProviderService
                 null, // no group id available due to exception
                 null, // no provider type available
                 originalModelName, // 使用原始模型名称
-                request.Tools?.Any() == true,
-                request.Stream,
+                hasTools,
+                isStreamRequest,
                 null); // no openrouter key available due to exception
 
             return new ProviderHttpResponse
@@ -1407,7 +1412,7 @@ public class MultiProviderService : IMultiProviderService
     /// <returns>HTTP响应</returns>
     /// </summary>
     public async Task<ProviderHttpResponse> ProcessGeminiHttpRequestAsync(
-        GeminiGenerateContentRequest request,
+        string requestJson,
         bool isStreamRequest,
         string proxyKey,
         string providerType,
@@ -1424,14 +1429,18 @@ public class MultiProviderService : IMultiProviderService
             proxyKeyId = validatedProxyKey?.Id;
         }
 
-        // 保存原始模型名称用于日志记录
-        var originalModelName = request.Model;
+        // 从JSON中提取模型名称用于路由
+        var requestDict = JsonConvert.DeserializeObject<Dictionary<string, object>>(requestJson)
+            ?? throw new ArgumentException("Invalid JSON format");
+        var originalModelName = requestDict.TryGetValue("model", out var modelValue)
+            ? modelValue?.ToString() ?? string.Empty
+            : string.Empty;
 
         // 记录请求开始
         var requestId = await _requestLogger.LogRequestStartAsync(
             "POST",
             endpoint,
-            JsonConvert.SerializeObject(request),
+            requestJson,
             null, // headers will be added later if needed
             proxyKeyId,
             clientIp,
@@ -1483,17 +1492,20 @@ public class MultiProviderService : IMultiProviderService
                     _logger.LogDebug("RequestId: {RequestId}, 尝试服务商 {ProviderType} (分组: {GroupId}) - 第 {AttemptNumber} 次",
                         requestId, routeResult.Group.ProviderType, routeResult.Group.Id, providerAttempt + 1);
 
-                    // 应用参数覆盖
-                    ApplyParameterOverrides(request, routeResult.ParameterOverrides);
-                    request.Model = routeResult.ResolvedModel;
+                    // 应用参数覆盖到请求字典
+                    ApplyParameterOverridesToDict(requestDict, routeResult.ParameterOverrides);
+                    requestDict["model"] = routeResult.ResolvedModel;
+
+                    // 序列化修改后的请求
+                    var modifiedRequestJson = JsonConvert.SerializeObject(requestDict);
 
                     // 获取服务商实例
                     var provider = _providerFactory.GetProvider(routeResult.Group.ProviderType);
                     var providerConfig = BuildProviderConfig(routeResult);
-                    providerConfig.Model = request.Model;
+                    providerConfig.Model = routeResult.ResolvedModel;
 
-                    // 准备HTTP请求内容 - 使用Gemini专用方法
-                    HttpContent httpContent = await ((GeminiProvider)provider).PrepareRequestContentAsync(request, providerConfig, cancellationToken);
+                    // 准备HTTP请求内容 - 使用JSON透传方法
+                    HttpContent httpContent = await ((GeminiProvider)provider).PrepareRequestContentFromJsonAsync(modifiedRequestJson, providerConfig, cancellationToken);
 
                     // 使用统一的重试策略（移除内部重试循环）
                     var maxRetries = routeResult.Group.RetryCount;
@@ -1737,7 +1749,7 @@ public class MultiProviderService : IMultiProviderService
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>HTTP响应</returns>
     public async Task<ProviderHttpResponse> ProcessAnthropicRequestAsync(
-        AnthropicMessageRequest request,
+        string requestJson,
         string proxyKey,
         string? clientIp = null,
         string? userAgent = null,
@@ -1752,14 +1764,18 @@ public class MultiProviderService : IMultiProviderService
             proxyKeyId = validatedProxyKey?.Id;
         }
 
-        // 保存原始模型名称用于日志记录
-        var originalModelName = request.Model;
+        // 从JSON中提取模型名称用于路由
+        var requestDict = JsonConvert.DeserializeObject<Dictionary<string, object>>(requestJson)
+            ?? throw new ArgumentException("Invalid JSON format");
+        var originalModelName = requestDict.TryGetValue("model", out var modelValue)
+            ? modelValue?.ToString() ?? string.Empty
+            : string.Empty;
 
         // 记录请求开始
         var requestId = await _requestLogger.LogRequestStartAsync(
             "POST",
             endpoint,
-            JsonConvert.SerializeObject(request),
+            requestJson,
             null,
             proxyKeyId,
             clientIp,
@@ -1820,23 +1836,13 @@ public class MultiProviderService : IMultiProviderService
                         };
                     }
 
-                    // 应用模型解析和参数覆盖
-                    var processedRequest = new AnthropicMessageRequest
-                    {
-                        Model = resolvedModel,
-                        Messages = request.Messages,
-                        System = request.System,
-                        MaxTokens = request.MaxTokens,
-                        Temperature = request.Temperature,
-                        TopP = request.TopP,
-                        TopK = request.TopK,
-                        Stream = request.Stream,
-                        StopSequences = request.StopSequences
-                    };
+                    // 应用模型解析到请求字典
+                    requestDict["model"] = resolvedModel;
 
-                    // 参数覆盖将在AnthropicProvider中处理
+                    // 序列化修改后的请求
+                    var modifiedRequestJson = JsonConvert.SerializeObject(requestDict);
 
-                    // 构建Provider配置
+                    // 构建Provider配置（参数覆盖将在Provider中处理）
                     var providerConfig = new ProviderConfig
                     {
                         ApiKeys = await _keyManager.GetGroupApiKeysAsync(group.Id),
@@ -1853,13 +1859,17 @@ public class MultiProviderService : IMultiProviderService
                         ProxyConfig = ParseProxyConfig(group)
                     };
 
-                    _logger.LogDebug("直接调用AnthropicProvider - RequestId: {RequestId}, Provider: {ProviderType}, GroupId: {GroupId}",
+                    _logger.LogDebug("直接调用AnthropicProvider(JSON透传) - RequestId: {RequestId}, Provider: {ProviderType}, GroupId: {GroupId}",
                         requestId, group.ProviderType, group.Id);
 
-                    // 准备Anthropic原生请求内容
-                    var httpContent = await ((AnthropicProvider)provider).PrepareAnthropicRequestContentAsync(processedRequest, providerConfig, cancellationToken);
+                    // 准备Anthropic原生请求内容（JSON透传模式）
+                    var httpContent = await ((AnthropicProvider)provider).PrepareAnthropicRequestContentFromJsonAsync(modifiedRequestJson, providerConfig, cancellationToken);
+
+                    // 从字典获取stream值
+                    var isStreaming = requestDict.TryGetValue("stream", out var streamValue) &&
+                                     streamValue is bool streamBool && streamBool;
                     // 注意：假流模式需要发送非流式请求到上游
-                    var actualIsStreaming = providerConfig.FakeStreaming ? false : processedRequest.Stream;
+                    var actualIsStreaming = providerConfig.FakeStreaming ? false : isStreaming;
                     var httpResponse = await provider.SendHttpRequestAsync(
                         httpContent, apiKey, providerConfig, actualIsStreaming, cancellationToken);
 
@@ -1879,7 +1889,7 @@ public class MultiProviderService : IMultiProviderService
                             group.ProviderType,
                             originalModelName, // 使用原始模型名称
                             false, // Anthropic请求通常没有tools
-                            processedRequest.Stream,
+                            isStreaming,
                             apiKey);
 
                         return httpResponse;
@@ -1907,7 +1917,7 @@ public class MultiProviderService : IMultiProviderService
                             group.ProviderType,
                             originalModelName, // 使用原始模型名称
                             false, // Anthropic请求通常没有tools
-                            processedRequest.Stream,
+                            isStreaming,
                             apiKey);
                         return httpResponse;
                     }
@@ -2249,9 +2259,10 @@ public class MultiProviderService : IMultiProviderService
                 return await anthropicProvider.PrepareAnthropicRequestContentAsync(anthropicRequest, providerConfig, cancellationToken);
 
             case GeminiProvider geminiProvider:
-                // 转换为Gemini生成内容格式
+                // 转换为Gemini生成内容格式，然后序列化为JSON透传
                 var geminiRequest = ConvertResponsesRequestToGemini(request);
-                return await geminiProvider.PrepareRequestContentAsync(geminiRequest, providerConfig, cancellationToken);
+                var geminiRequestJson = JsonConvert.SerializeObject(geminiRequest);
+                return await geminiProvider.PrepareRequestContentFromJsonAsync(geminiRequestJson, providerConfig, cancellationToken);
 
             default:
                 // 默认转换为OpenAI格式

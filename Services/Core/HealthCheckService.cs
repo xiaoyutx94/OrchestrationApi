@@ -376,9 +376,9 @@ public class HealthCheckService : IHealthCheckService
         switch (provider)
         {
             case AnthropicProvider anthropicProvider:
-                // 将ChatCompletionRequest转换为AnthropicMessageRequest
-                var anthropicRequest = ConvertChatRequestToAnthropic(testRequest);
-                return await anthropicProvider.PrepareAnthropicRequestContentAsync(anthropicRequest, providerConfig, cancellationToken);
+                // 将ChatCompletionRequest转换为Anthropic JSON格式（字典透传）
+                var anthropicRequestJson = ConvertChatRequestToAnthropicJson(testRequest);
+                return await anthropicProvider.PrepareAnthropicRequestContentFromJsonAsync(anthropicRequestJson, providerConfig, cancellationToken);
 
             default:
                 // 对于其他Provider（OpenAI、Gemini等），使用标准方法
@@ -387,37 +387,43 @@ public class HealthCheckService : IHealthCheckService
     }
 
     /// <summary>
-    /// 将ChatCompletionRequest转换为AnthropicMessageRequest
+    /// 将ChatCompletionRequest转换为Anthropic JSON格式（字典模式）
     /// </summary>
-    private AnthropicMessageRequest ConvertChatRequestToAnthropic(ChatCompletionRequest request)
+    private string ConvertChatRequestToAnthropicJson(ChatCompletionRequest request)
     {
-        var anthropicMessages = new List<AnthropicMessage>();
+        var anthropicMessages = new List<Dictionary<string, object>>();
 
         foreach (var message in request.Messages)
         {
-            var anthropicMessage = new AnthropicMessage
+            var anthropicMessage = new Dictionary<string, object>
             {
-                Role = message.Role,
-                Content = new List<AnthropicContent>
+                ["role"] = message.Role,
+                ["content"] = new List<Dictionary<string, object>>
                 {
-                    new AnthropicContent
+                    new Dictionary<string, object>
                     {
-                        Type = "text",
-                        Text = message.Content?.ToString() ?? ""
+                        ["type"] = "text",
+                        ["text"] = message.Content?.ToString() ?? ""
                     }
                 }
             };
             anthropicMessages.Add(anthropicMessage);
         }
 
-        return new AnthropicMessageRequest
+        var anthropicRequest = new Dictionary<string, object>
         {
-            Model = request.Model,
-            MaxTokens = request.MaxTokens ?? 1,
-            Messages = anthropicMessages,
-            Temperature = request.Temperature,
-            Stream = false // 健康检查不使用流式
+            ["model"] = request.Model,
+            ["max_tokens"] = request.MaxTokens ?? 1,
+            ["messages"] = anthropicMessages,
+            ["stream"] = false // 健康检查不使用流式
         };
+
+        if (request.Temperature.HasValue)
+        {
+            anthropicRequest["temperature"] = request.Temperature.Value;
+        }
+
+        return JsonConvert.SerializeObject(anthropicRequest);
     }
 
     private async Task<GroupConfig?> GetGroupConfigAsync(string groupId)

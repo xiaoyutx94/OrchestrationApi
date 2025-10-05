@@ -56,6 +56,20 @@ public class AnthropicProvider : ILLMProvider
         throw new NotSupportedException("AnthropicProvider 不再支持 ChatCompletionRequest 格式，请使用 AnthropicMessageRequest 格式调用 PrepareAnthropicRequestContentAsync 方法");
     }
 
+    /// <summary>
+    /// 从JSON字符串准备HTTP请求内容（用于透明代理模式）
+    /// </summary>
+    public Task<HttpContent> PrepareRequestContentFromJsonAsync(
+        string requestJson,
+        ProviderConfig config,
+        CancellationToken cancellationToken = default)
+    {
+        // Anthropic需要转换OpenAI格式到Anthropic格式
+        // 这里简化处理：直接透传，由Provider的转换逻辑处理
+        // TODO: 如果需要完整支持，应该在这里进行格式转换
+        return Task.FromResult<HttpContent>(new StringContent(requestJson, Encoding.UTF8, "application/json"));
+    }
+
     public Task<HttpContent> PrepareAnthropicRequestContentAsync(
         AnthropicMessageRequest request,
         ProviderConfig config,
@@ -73,6 +87,36 @@ public class AnthropicProvider : ILLMProvider
         _logger.LogDebug("Anthropic原生API请求内容: {RequestContent}, 分组: {GroupId}({GroupName})", 
             json, config.GroupId ?? "未知", config.GroupName ?? "未知");
         
+        return Task.FromResult<HttpContent>(new StringContent(json, Encoding.UTF8, "application/json"));
+    }
+
+    /// <summary>
+    /// 准备Anthropic原生请求内容（JSON透传模式）
+    /// </summary>
+    public Task<HttpContent> PrepareAnthropicRequestContentFromJsonAsync(
+        string requestJson,
+        ProviderConfig config,
+        CancellationToken cancellationToken = default)
+    {
+        // 反序列化为字典以支持参数覆盖
+        var requestDict = JsonConvert.DeserializeObject<Dictionary<string, object>>(requestJson)
+            ?? throw new ArgumentException("Invalid JSON format");
+
+        // 应用参数覆盖到字典
+        foreach (var (key, value) in config.ParameterOverrides)
+        {
+            requestDict[key] = value;
+        }
+
+        // 序列化回JSON
+        var json = JsonConvert.SerializeObject(requestDict, Formatting.None, new JsonSerializerSettings
+        {
+            NullValueHandling = NullValueHandling.Ignore
+        });
+
+        _logger.LogDebug("Anthropic原生API请求内容(JSON透传): {RequestContent}, 分组: {GroupId}({GroupName})",
+            json, config.GroupId ?? "未知", config.GroupName ?? "未知");
+
         return Task.FromResult<HttpContent>(new StringContent(json, Encoding.UTF8, "application/json"));
     }
 
