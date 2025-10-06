@@ -37,7 +37,7 @@ public interface IProviderRouter
     /// <param name="excludedGroups">需要排除的分组ID列表（用于避免重复选择已失败的分组）</param>
     /// <returns>路由结果</returns>
     /// </summary>
-    Task<ProviderRouteResult> RouteRequestAsync(string model, string proxyKey, string forcedProviderType, HashSet<string>? excludedGroups = null);
+    Task<ProviderRouteResult> RouteRequestAsync(string model, string proxyKey, string? forcedProviderType, HashSet<string>? excludedGroups = null);
 
     /// <summary>
     /// 获取指定代理密钥允许访问的分组
@@ -45,7 +45,7 @@ public interface IProviderRouter
     /// <param name="providerType">服务商类型</param>
     /// <returns>允许访问的分组</returns>
     /// </summary>
-    Task<List<GroupConfig>> GetAllowedGroupsAsync(string proxyKey, string providerType);
+    Task<List<GroupConfig>> GetAllowedGroupsAsync(string proxyKey, string? providerType);
 
     /// <summary>
     /// 根据模型名称查找合适的分组
@@ -62,7 +62,7 @@ public interface IProviderRouter
     /// <param name="providerType">服务商类型</param>
     /// <returns>是否允许访问</returns>
     /// </summary>
-    Task<bool> CheckGroupPermissionAsync(string groupId, string? proxyKey, string providerType);
+    Task<bool> CheckGroupPermissionAsync(string groupId, string? proxyKey, string? providerType);
 
     /// <summary>
     /// 解析模型别名
@@ -106,7 +106,7 @@ public class ProviderRouter : IProviderRouter
     public async Task<ProviderRouteResult> RouteRequestAsync(
         string model,
         string proxyKey,
-        string forcedProviderType,
+        string? forcedProviderType,
         HashSet<string>? excludedGroups = null)
     {
         try
@@ -241,7 +241,7 @@ public class ProviderRouter : IProviderRouter
     /// <param name="proxyKey">代理密钥</param>
     /// <param name="providerType">服务商类型</param>
     /// <returns>允许访问的分组</returns>
-    public async Task<List<GroupConfig>> GetAllowedGroupsAsync(string proxyKey, string providerType)
+    public async Task<List<GroupConfig>> GetAllowedGroupsAsync(string proxyKey, string? providerType)
     {
         try
         {
@@ -343,7 +343,7 @@ public class ProviderRouter : IProviderRouter
     /// <param name="proxyKey">代理密钥</param>
     /// <param name="providerType">服务商类型</param>
     /// <returns>是否允许访问</returns>
-    public async Task<bool> CheckGroupPermissionAsync(string groupId, string? proxyKey, string providerType)
+    public async Task<bool> CheckGroupPermissionAsync(string groupId, string? proxyKey, string? providerType)
     {
         try
         {
@@ -390,7 +390,7 @@ public class ProviderRouter : IProviderRouter
     private async Task<List<GroupConfig>> GetCandidateGroupsAsync(
         string model,
         string? proxyKey,
-        string forcedProviderType)
+        string? forcedProviderType)
     {
         var candidateGroups = new List<GroupConfig>();
 
@@ -429,10 +429,12 @@ public class ProviderRouter : IProviderRouter
     /// <param name="proxyKey">代理密钥</param>
     /// <param name="forcedProviderType">强制服务商类型</param>
     /// <returns>选择的分组</returns>
-    private GroupConfig SelectGroupByProxyKeyPolicy(List<GroupConfig> candidateGroups, ProxyKey? proxyKey, string forcedProviderType)
+    private GroupConfig SelectGroupByProxyKeyPolicy(List<GroupConfig> candidateGroups, ProxyKey? proxyKey, string? forcedProviderType)
     {
 
-        List<GroupConfig> filteredGroups = candidateGroups.Where(g => g.ProviderType == forcedProviderType).ToList();
+        List<GroupConfig> filteredGroups = string.IsNullOrEmpty(forcedProviderType)
+            ? candidateGroups
+            : candidateGroups.Where(g => g.ProviderType == forcedProviderType).ToList();
 
         // 如果没有代理密钥或只有一个候选分组，使用默认故障转移策略
         if (proxyKey == null || filteredGroups.Count == 1)

@@ -96,9 +96,9 @@ public class V1Controller : ControllerBase
             _logger.LogDebug("接收到聊天完成请求 - ProxyKey: {ProxyKey}, ProviderType: {ProviderType}，原始请求：{RawRequest}",
                 string.IsNullOrEmpty(proxyKey) ? "无" : "已提供", providerType, rawJsonBody);
 
-            // 使用透明HTTP代理（直接传递JSON字符串，内部会进行模型验证和路由）
-            var httpResponse = await _multiProviderService.ProcessChatCompletionHttpAsync(
-                rawJsonBody, proxyKey, providerType, clientIp, userAgent, httpRequest.Path, HttpContext.RequestAborted);
+            // 使用统一的HTTP透明代理（直接传递JSON字符串，内部会进行模型验证和路由）
+            var httpResponse = await _multiProviderService.ProcessHttpRequestAsync(
+                rawJsonBody, proxyKey, providerType, null, clientIp, userAgent, httpRequest.Path, HttpContext.RequestAborted);
 
             if (!httpResponse.IsSuccess)
             {

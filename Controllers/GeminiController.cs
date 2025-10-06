@@ -88,9 +88,9 @@ public class GeminiController : ControllerBase
             requestDict["model"] = model;
             var modifiedRequestJson = JsonConvert.SerializeObject(requestDict);
 
-            // 使用Gemini专用HTTP代理（JSON透传模式）
-            var httpResponse = await _multiProviderService.ProcessGeminiHttpRequestAsync(
-                modifiedRequestJson, false, proxyKey, _providerType, clientIp, userAgent,
+            // 使用统一的HTTP透明代理（JSON透传模式，Gemini非流式）
+            var httpResponse = await _multiProviderService.ProcessHttpRequestAsync(
+                modifiedRequestJson, proxyKey, _providerType, false, clientIp, userAgent,
                 httpRequest.Path, HttpContext.RequestAborted);
 
             if (!httpResponse.IsSuccess)
@@ -217,9 +217,9 @@ public class GeminiController : ControllerBase
             requestDict["model"] = model;
             var modifiedRequestJson = JsonConvert.SerializeObject(requestDict);
 
-            // 使用Gemini专用HTTP代理，启用流式（JSON透传模式）
-            var httpResponse = await _multiProviderService.ProcessGeminiHttpRequestAsync(
-                modifiedRequestJson, true, proxyKey, _providerType, clientIp, userAgent,
+            // 使用统一的HTTP透明代理（JSON透传模式，Gemini流式）
+            var httpResponse = await _multiProviderService.ProcessHttpRequestAsync(
+                modifiedRequestJson, proxyKey, _providerType, true, clientIp, userAgent,
                 httpRequest.Path, HttpContext.RequestAborted);
 
             if (!httpResponse.IsSuccess)

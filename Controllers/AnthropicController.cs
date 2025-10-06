@@ -88,9 +88,9 @@ public class AnthropicController : ControllerBase
             _logger.LogDebug("接收到Anthropic原生消息请求 - Model: {Model}, Stream: {Stream}, ProxyKey: {ProxyKey}，原始请求：{RawRequest}",
                 model, stream, string.IsNullOrEmpty(proxyKey) ? "无" : "已提供", rawJsonBody);
 
-            // 使用Anthropic原生HTTP代理（JSON透传模式）
-            var httpResponse = await _multiProviderService.ProcessAnthropicRequestAsync(
-                rawJsonBody, proxyKey, clientIp, userAgent, httpRequest.Path, HttpContext.RequestAborted);
+            // 使用统一的HTTP透明代理（JSON透传模式，Anthropic）
+            var httpResponse = await _multiProviderService.ProcessHttpRequestAsync(
+                rawJsonBody, proxyKey, "anthropic", null, clientIp, userAgent, httpRequest.Path, HttpContext.RequestAborted);
 
             if (!httpResponse.IsSuccess)
             {

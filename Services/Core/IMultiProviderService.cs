@@ -38,48 +38,6 @@ public interface IMultiProviderService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 处理聊天完成HTTP请求（透明代理模式）
-    /// </summary>
-    /// <param name="requestJson">聊天完成请求的JSON字符串</param>
-    /// <param name="proxyKey">代理密钥</param>
-    /// <param name="providerType">服务商类型</param>
-    /// <param name="clientIp">客户端IP</param>
-    /// <param name="userAgent">用户代理</param>
-    /// <param name="endpoint">请求路径</param>
-    /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>HTTP响应</returns>
-    Task<ProviderHttpResponse> ProcessChatCompletionHttpAsync(
-        string requestJson,
-        string proxyKey,
-        string providerType,
-        string? clientIp = null,
-        string? userAgent = null,
-        string? endpoint = null,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// 处理Gemini HTTP请求（透明代理模式）
-    /// </summary>
-    /// <param name="request">Gemini请求</param>
-    /// <param name="isStreamRequest">是否流式请求</param>
-    /// <param name="proxyKey">代理密钥</param>
-    /// <param name="providerType">服务商类型</param>
-    /// <param name="clientIp">客户端IP</param>
-    /// <param name="userAgent">用户代理</param>
-    /// <param name="endpoint">请求路径</param>
-    /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>HTTP响应</returns>
-    Task<ProviderHttpResponse> ProcessGeminiHttpRequestAsync(
-        string requestJson,
-        bool isStreamRequest,
-        string proxyKey,
-        string providerType,
-        string? clientIp = null,
-        string? userAgent = null,
-        string? endpoint = null,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
     /// 获取可用模型列表
     /// </summary>
     /// <param name="proxyKey">代理密钥</param>
@@ -94,19 +52,22 @@ public interface IMultiProviderService
     Task<GeminiNativeModelsResponse> GetGeminiAvailableModelsAsync(string proxyKey, string providerType);
 
     /// <summary>
-    /// 处理Anthropic原生HTTP请求（透明代理模式）
+    /// 处理统一的HTTP透传请求（支持OpenAI、Gemini、Anthropic等所有Provider）
     /// </summary>
-    /// <param name="request">Anthropic原生消息请求</param>
+    /// <param name="requestJson">原始请求JSON字符串</param>
     /// <param name="proxyKey">代理密钥</param>
+    /// <param name="providerType">Provider类型（可选，null时自动路由到所有类型）</param>
+    /// <param name="isStreamRequest">是否为流式请求（可选，仅Gemini需要从路径判断，其他从JSON提取）</param>
     /// <param name="clientIp">客户端IP</param>
     /// <param name="userAgent">用户代理</param>
-    /// <param name="endpoint">请求路径</param>
+    /// <param name="endpoint">请求端点</param>
     /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>HTTP响应</returns>
-    /// <returns>HTTP响应</returns>
-    Task<ProviderHttpResponse> ProcessAnthropicRequestAsync(
+    /// <returns>Provider HTTP响应</returns>
+    Task<ProviderHttpResponse> ProcessHttpRequestAsync(
         string requestJson,
         string proxyKey,
+        string? providerType = null,
+        bool? isStreamRequest = null,
         string? clientIp = null,
         string? userAgent = null,
         string? endpoint = null,
@@ -813,7 +774,7 @@ public class MultiProviderService : IMultiProviderService
     private static ProviderConfig BuildProviderConfig(ProviderRouteResult routeResult)
     {
         var group = routeResult.Group!;
-        
+
         return new ProviderConfig
         {
             ApiKeys = new List<string> { routeResult.ApiKey! },
@@ -1042,21 +1003,11 @@ public class MultiProviderService : IMultiProviderService
         public Exception? Exception { get; set; }
     }
 
-    /// <summary>
-    /// 处理HTTP透明代理聊天完成请求
-    /// </summary>
-    /// <param name="requestJson">聊天完成请求的JSON字符串</param>
-    /// <param name="proxyKey">代理密钥</param>
-    /// <param name="providerType">服务商类型</param>
-    /// <param name="clientIp">客户端IP</param>
-    /// <param name="userAgent">用户代理</param>
-    /// <param name="endpoint">请求路径</param>
-    /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>HTTP响应</returns>
-    public async Task<ProviderHttpResponse> ProcessChatCompletionHttpAsync(
+    public async Task<ProviderHttpResponse> ProcessHttpRequestAsync(
         string requestJson,
         string proxyKey,
-        string providerType,
+        string? providerType = null,
+        bool? isStreamRequest = null,
         string? clientIp = null,
         string? userAgent = null,
         string? endpoint = null,
@@ -1085,7 +1036,9 @@ public class MultiProviderService : IMultiProviderService
 
         // 从字典中提取必要的字段
         var originalModelName = requestDict.ContainsKey("model") ? requestDict["model"]?.ToString() ?? string.Empty : string.Empty;
-        var isStreamRequest = requestDict.ContainsKey("stream") && Convert.ToBoolean(requestDict["stream"]);
+
+        // 智能提取stream参数：Gemini从参数获取，其他从JSON提取
+        var stream = isStreamRequest ?? (requestDict.ContainsKey("stream") && Convert.ToBoolean(requestDict["stream"]));
         var hasTools = requestDict.ContainsKey("tools") && requestDict["tools"] != null;
 
         // 获取代理密钥ID
@@ -1108,8 +1061,8 @@ public class MultiProviderService : IMultiProviderService
 
         try
         {
-            _logger.LogInformation("开始处理HTTP透明代理聊天完成请求 - RequestId: {RequestId}, Model: {Model}",
-                requestId, originalModelName);
+            _logger.LogInformation("开始处理HTTP透明代理请求 - RequestId: {RequestId}, Model: {Model}, ProviderType: {ProviderType}",
+                requestId, originalModelName, providerType ?? "auto");
 
             // 获取最大服务商重试个数配置
             var maxProviderRetries = _configuration.GetValue<int>("OrchestrationApi:Global:MaxProviderRetries", 3);
@@ -1154,13 +1107,14 @@ public class MultiProviderService : IMultiProviderService
 
                     // 应用参数覆盖（直接操作字典）
                     ApplyParameterOverridesToDict(requestDict, routeResult.ParameterOverrides);
-                    
-                    // 更新模型名称
-                    requestDict["model"] = routeResult.ResolvedModel;
 
                     // 获取服务商实例
                     var provider = _providerFactory.GetProvider(routeResult.Group.ProviderType);
                     var providerConfig = BuildProviderConfig(routeResult);
+
+                    // 更新模型名称
+                    requestDict["model"] = routeResult.ResolvedModel;
+                    providerConfig.Model = routeResult.ResolvedModel;
 
                     // 将修改后的字典序列化为JSON字符串
                     var modifiedRequestJson = JsonConvert.SerializeObject(requestDict);
@@ -1199,7 +1153,7 @@ public class MultiProviderService : IMultiProviderService
 
                             // 发送HTTP请求（Provider不再包含重试逻辑）
                             // 注意：这里不能直接传入request.Stream，因为假流模式需要发送非流式请求到上游
-                            var actualIsStreaming = providerConfig.FakeStreaming ? false : isStreamRequest;
+                            var actualIsStreaming = providerConfig.FakeStreaming ? false : stream;
                             var response = await provider.SendHttpRequestAsync(
                                 httpContent, currentApiKey!, providerConfig, actualIsStreaming, cancellationToken);
 
@@ -1234,7 +1188,7 @@ public class MultiProviderService : IMultiProviderService
                                     routeResult.Group.ProviderType,
                                     originalModelName, // 使用原始模型名称
                                     hasTools,
-                                    isStreamRequest,
+                                    stream,
                                     currentApiKey);
 
                                 _logger.LogInformation("HTTP透明代理请求成功 - RequestId: {RequestId}, 服务商: {ProviderType}, 尝试次数: {Attempt}",
@@ -1269,7 +1223,7 @@ public class MultiProviderService : IMultiProviderService
                                         routeResult.Group.ProviderType,
                                         originalModelName,
                                         hasTools,
-                                        isStreamRequest,
+                                        stream,
                                         currentApiKey);
 
                                     // 不可重试的错误，直接返回
@@ -1363,7 +1317,7 @@ public class MultiProviderService : IMultiProviderService
                 null, // no provider type available
                 originalModelName, // 使用原始模型名称
                 hasTools,
-                isStreamRequest,
+                stream,
                 null); // no openrouter key available since all providers failed
 
             return new ProviderHttpResponse
@@ -1387,7 +1341,7 @@ public class MultiProviderService : IMultiProviderService
                 null, // no provider type available
                 originalModelName, // 使用原始模型名称
                 hasTools,
-                isStreamRequest,
+                stream,
                 null); // no openrouter key available due to exception
 
             return new ProviderHttpResponse
@@ -1395,589 +1349,6 @@ public class MultiProviderService : IMultiProviderService
                 StatusCode = 500,
                 IsSuccess = false,
                 ErrorMessage = ex.Message
-            };
-        }
-    }
-
-    /// <summary>
-    /// 处理Gemini HTTP请求（透明代理模式）
-    /// <param name="request">Gemini请求</param>
-    /// <param name="isStreamRequest">是否流式请求</param>
-    /// <param name="proxyKey">代理密钥</param>
-    /// <param name="providerType">服务商类型</param>
-    /// <param name="clientIp">客户端IP</param>
-    /// <param name="userAgent">用户代理</param>
-    /// <param name="endpoint">请求路径</param>
-    /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>HTTP响应</returns>
-    /// </summary>
-    public async Task<ProviderHttpResponse> ProcessGeminiHttpRequestAsync(
-        string requestJson,
-        bool isStreamRequest,
-        string proxyKey,
-        string providerType,
-        string? clientIp = null,
-        string? userAgent = null,
-        string? endpoint = null,
-        CancellationToken cancellationToken = default)
-    {
-        // 获取代理密钥ID
-        int? proxyKeyId = null;
-        if (!string.IsNullOrEmpty(proxyKey))
-        {
-            var validatedProxyKey = await _keyManager.ValidateProxyKeyAsync(proxyKey);
-            proxyKeyId = validatedProxyKey?.Id;
-        }
-
-        // 从JSON中提取模型名称用于路由
-        var requestDict = JsonConvert.DeserializeObject<Dictionary<string, object>>(requestJson)
-            ?? throw new ArgumentException("Invalid JSON format");
-        var originalModelName = requestDict.TryGetValue("model", out var modelValue)
-            ? modelValue?.ToString() ?? string.Empty
-            : string.Empty;
-
-        // 记录请求开始
-        var requestId = await _requestLogger.LogRequestStartAsync(
-            "POST",
-            endpoint,
-            requestJson,
-            null, // headers will be added later if needed
-            proxyKeyId,
-            clientIp,
-            userAgent);
-
-        try
-        {
-            _logger.LogInformation("开始处理Gemini HTTP透明代理请求 - RequestId: {RequestId}",
-                requestId);
-
-            // 获取最大服务商重试个数配置
-            var maxProviderRetries = _configuration.GetValue<int>("OrchestrationApi:Global:MaxProviderRetries", 3);
-            var triedProviders = new HashSet<string>();
-            var failedGroups = new HashSet<string>(); // 记录已失败的分组ID，用于智能降级
-            Exception? lastException = null;
-
-            for (int providerAttempt = 0; providerAttempt < maxProviderRetries; providerAttempt++)
-            {
-                string? currentGroupId = null; // 记录当前尝试的分组ID
-                try
-                {
-                    // 根据Gemini服务商类型路由请求，传递已失败的分组以实现智能降级
-                    var routeResult = await _router.RouteRequestAsync(originalModelName, proxyKey, providerType, failedGroups);
-                    if (!routeResult.Success)
-                    {
-                        // 如果路由失败但有失败的分组ID，记录它以避免重复选择
-                        if (!string.IsNullOrEmpty(routeResult.FailedGroupId))
-                        {
-                            failedGroups.Add(routeResult.FailedGroupId);
-                            _logger.LogDebug("RequestId: {RequestId}, 路由失败，将分组 {GroupId} 添加到失败列表: {ErrorMessage}",
-                                requestId, routeResult.FailedGroupId, routeResult.ErrorMessage);
-                        }
-                        throw new InvalidOperationException(routeResult.ErrorMessage);
-                    }
-
-                    // 记录当前尝试的分组ID
-                    currentGroupId = routeResult.Group!.Id;
-
-                    // 检查是否已经尝试过这个服务商
-                    var providerKey = $"{routeResult.Group.ProviderType}_{routeResult.Group.Id}";
-                    if (triedProviders.Contains(providerKey))
-                    {
-                        _logger.LogDebug("RequestId: {RequestId}, 已尝试过服务商 {ProviderKey}，跳过",
-                            requestId, providerKey);
-                        continue;
-                    }
-                    triedProviders.Add(providerKey);
-
-                    _logger.LogDebug("RequestId: {RequestId}, 尝试服务商 {ProviderType} (分组: {GroupId}) - 第 {AttemptNumber} 次",
-                        requestId, routeResult.Group.ProviderType, routeResult.Group.Id, providerAttempt + 1);
-
-                    // 应用参数覆盖到请求字典
-                    ApplyParameterOverridesToDict(requestDict, routeResult.ParameterOverrides);
-                    requestDict["model"] = routeResult.ResolvedModel;
-
-                    // 序列化修改后的请求
-                    var modifiedRequestJson = JsonConvert.SerializeObject(requestDict);
-
-                    // 获取服务商实例
-                    var provider = _providerFactory.GetProvider(routeResult.Group.ProviderType);
-                    var providerConfig = BuildProviderConfig(routeResult);
-                    providerConfig.Model = routeResult.ResolvedModel;
-
-                    // 准备HTTP请求内容 - 使用JSON透传方法
-                    HttpContent httpContent = await ((GeminiProvider)provider).PrepareRequestContentFromJsonAsync(modifiedRequestJson, providerConfig, cancellationToken);
-
-                    // 使用统一的重试策略（移除内部重试循环）
-                    var maxRetries = routeResult.Group.RetryCount;
-                    for (int attempt = 0; attempt <= maxRetries; attempt++)
-                    {
-                        try
-                        {
-                            // 获取API密钥
-                            var currentApiKey = routeResult.ApiKey;
-                            if (attempt > 0)
-                            {
-                                var newKey = await _keyManager.GetNextKeyAsync(routeResult.Group.Id);
-                                if (string.IsNullOrEmpty(newKey))
-                                {
-                                    // 没有更多密钥时，记录失败的分组ID，避免重复选择
-                                    if (!failedGroups.Contains(routeResult.Group.Id))
-                                    {
-                                        failedGroups.Add(routeResult.Group.Id);
-                                        _logger.LogDebug("RequestId: {RequestId}, 服务商: {ProviderType}, 分组: {GroupId} 没有更多可用的API密钥，已将分组添加到失败列表",
-                                            requestId, routeResult.Group.ProviderType, routeResult.Group.Id);
-                                    }
-                                    break; // 没有更多密钥，跳出当前Provider的重试循环
-                                }
-                                currentApiKey = newKey;
-                                providerConfig.ApiKeys = [newKey];
-                            }
-
-                            _logger.LogDebug("发送HTTP请求 - RequestId: {RequestId}, 服务商: {ProviderType}, 分组: {GroupId}, 尝试: {Attempt}, API密钥: {ApiKey}",
-                                requestId, routeResult.Group.ProviderType, routeResult.Group.Id, attempt + 1, currentApiKey?[..8] + "...");
-
-                            // 发送HTTP请求（Provider不再包含重试逻辑）
-                            // 注意：假流模式需要发送非流式请求到上游
-                            var actualIsStreaming = providerConfig.FakeStreaming ? false : isStreamRequest;
-                            var response = await provider.SendHttpRequestAsync(
-                                httpContent, currentApiKey!, providerConfig, actualIsStreaming, cancellationToken);
-
-                            // 分析响应并决定后续策略
-                            var (shouldRetry, shouldSwitchApiKey, shouldSwitchProvider) = AnalyzeProviderResponse(response, null);
-
-                            if (response.IsSuccess)
-                            {
-                                // 成功 - 重置密钥错误计数
-                                await _keyManager.ResetKeyErrorCountAsync(routeResult.Group.Id, currentApiKey!);
-
-                                // 更新密钥使用统计（HTTP透明代理）
-                                await _keyManager.UpdateKeyUsageStatsAsync(routeResult.Group.Id, currentApiKey!);
-
-                                // 更新代理密钥使用统计
-                                if (!string.IsNullOrEmpty(proxyKey))
-                                {
-                                    var validatedProxyKey = await _keyManager.ValidateProxyKeyAsync(proxyKey);
-                                    if (validatedProxyKey != null)
-                                    {
-                                        await _keyManager.UpdateProxyKeyUsageAsync(validatedProxyKey.Id);
-                                    }
-                                }
-
-                                // 记录成功的请求日志
-                                await _requestLogger.LogRequestEndAsync(requestId, response.StatusCode,
-                                    null, // HTTP透明代理模式不记录响应体内容，保持透传性能
-                                    response.Headers,
-                                    null, // no error message
-                                    null, null, null, // token信息在HTTP透明代理模式下无法准确获取
-                                    routeResult.Group.Id,
-                                    routeResult.Group.ProviderType,
-                                    originalModelName, // 使用原始模型名称而不是硬编码的"gemini"
-                                    false, // Gemini请求通常没有tools
-                                    isStreamRequest,
-                                    currentApiKey);
-
-                                _logger.LogInformation("Gemini HTTP透明代理请求成功 - RequestId: {RequestId}, 服务商: {ProviderType}, 尝试次数: {Attempt}",
-                                    requestId, routeResult.Group.ProviderType, attempt + 1);
-
-                                return response;
-                            }
-                            else
-                            {
-                                // 失败 - 报告密钥错误
-                                await _keyManager.ReportKeyErrorAsync(routeResult.Group.Id, currentApiKey!,
-                                    response.ErrorMessage ?? "HTTP请求失败");
-
-                                _logger.LogWarning("Provider响应失败 - Provider: {ProviderType}, 状态码: {StatusCode}, 错误: {Error}, 策略: 重试={ShouldRetry}, 切换密钥={ShouldSwitchApiKey}, 切换Provider={ShouldSwitchProvider}",
-                                    routeResult.Group.ProviderType, response.StatusCode, response.ErrorMessage, shouldRetry, shouldSwitchApiKey, shouldSwitchProvider);
-
-                                if (shouldSwitchProvider)
-                                {
-                                    // 需要切换Provider，跳出当前Provider的重试循环
-                                    break;
-                                }
-
-                                if (!shouldRetry)
-                                {
-                                    // 记录失败的请求日志
-                                    await _requestLogger.LogRequestEndAsync(requestId, response.StatusCode,
-                                        null, // HTTP透明代理模式不记录响应体内容
-                                        response.Headers,
-                                        response.ErrorMessage,
-                                        null, null, null, // token信息在HTTP透明代理模式下无法准确获取
-                                        routeResult.Group.Id,
-                                        routeResult.Group.ProviderType,
-                                        originalModelName, // 使用原始模型名称而不是硬编码的"gemini"
-                                        false, // Gemini请求通常没有tools
-                                        isStreamRequest,
-                                        currentApiKey);
-
-                                    // 不可重试的错误，直接返回
-                                    return response;
-                                }
-
-                                if (shouldSwitchApiKey)
-                                {
-                                    // 切换API密钥，继续重试
-                                    continue;
-                                }
-
-                                // 使用相同密钥重试
-                                if (attempt >= maxRetries)
-                                {
-                                    // 达到最大重试次数，跳出循环
-                                    break;
-                                }
-
-                                // 等待一段时间再重试（指数退避）
-                                var delaySeconds = Math.Min(Math.Pow(2, attempt), 30);
-                                await Task.Delay(TimeSpan.FromSeconds(delaySeconds), cancellationToken);
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            lastException = ex;
-                            var (shouldRetry, shouldSwitchApiKey, shouldSwitchProvider) = AnalyzeException(ex);
-
-                            _logger.LogWarning(ex, "Provider异常 - Provider: {ProviderType}, 尝试: {Attempt}, 异常: {ExceptionType}, 策略: 重试={ShouldRetry}, 切换密钥={ShouldSwitchApiKey}, 切换Provider={ShouldSwitchProvider}",
-                                routeResult.Group.ProviderType, attempt + 1, ex.GetType().Name, shouldRetry, shouldSwitchApiKey, shouldSwitchProvider);
-
-                            // 报告密钥错误
-                            await _keyManager.ReportKeyErrorAsync(routeResult.Group.Id, routeResult.ApiKey!, ex.Message);
-
-                            if (shouldSwitchProvider)
-                            {
-                                // 需要切换Provider，跳出当前Provider的重试循环
-                                break;
-                            }
-
-                            if (!shouldRetry)
-                            {
-                                // 不可重试的错误，抛出异常
-                                throw;
-                            }
-
-                            if (attempt >= maxRetries)
-                            {
-                                // 达到最大重试次数，跳出循环
-                                break;
-                            }
-
-                            // 等待一段时间再重试
-                            var delaySeconds = Math.Min(Math.Pow(2, attempt), 30);
-                            await Task.Delay(TimeSpan.FromSeconds(delaySeconds), cancellationToken);
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    lastException = ex;
-                    _logger.LogWarning(ex, "处理Gemini HTTP透明代理请求时发生异常 - RequestId: {RequestId}, 服务商尝试: {ProviderAttempt}",
-                        requestId, providerAttempt + 1);
-
-                    // 将失败的分组添加到失败列表，避免重复选择
-                    if (!string.IsNullOrEmpty(currentGroupId))
-                    {
-                        failedGroups.Add(currentGroupId);
-                        _logger.LogDebug("RequestId: {RequestId}, 将分组 {GroupId} 添加到失败列表，避免重复选择",
-                            requestId, currentGroupId);
-                    }
-                }
-            }
-
-            // 所有服务商都失败
-            var errorMessage = triedProviders.Count >= maxProviderRetries
-                ? "当前代理密钥对于Gemini服务商无可用实例"
-                : "暂无可用Gemini服务商处理请求";
-
-            _logger.LogError("Gemini HTTP透明代理请求失败 - RequestId: {RequestId}, 已尝试 {TriedProviders} 个服务商",
-                requestId, triedProviders.Count);
-
-            // 记录失败的请求日志
-            await _requestLogger.LogRequestEndAsync(requestId, 500,
-                null, // no response body
-                null, // no response headers
-                errorMessage,
-                null, null, null, // no token info
-                null, // no group id available since all providers failed
-                null, // no provider type available
-                originalModelName, // 使用原始模型名称而不是硬编码的"gemini"
-                false, // Gemini请求通常没有tools
-                isStreamRequest,
-                null); // no openrouter key available since all providers failed
-
-            return new ProviderHttpResponse
-            {
-                StatusCode = 500,
-                IsSuccess = false,
-                ErrorMessage = errorMessage
-            };
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "处理Gemini HTTP透明代理请求时发生异常 - RequestId: {RequestId}", requestId);
-
-            // 记录异常的请求日志
-            await _requestLogger.LogRequestEndAsync(requestId, 500,
-                null, // no response body
-                null, // no response headers
-                ex.Message,
-                null, null, null, // no token info
-                null, // no group id available due to exception
-                null, // no provider type available
-                originalModelName, // 使用原始模型名称而不是硬编码的"gemini"
-                false, // Gemini请求通常没有tools
-                isStreamRequest,
-                null); // no openrouter key available due to exception
-
-            return new ProviderHttpResponse
-            {
-                StatusCode = 500,
-                IsSuccess = false,
-                ErrorMessage = ex.Message
-            };
-        }
-    }
-
-    /// <summary>
-    /// 处理Anthropic原生HTTP请求（透明代理模式）
-    /// </summary>
-    /// <param name="request">Anthropic请求</param>
-    /// <param name="proxyKey">代理密钥</param>
-    /// <param name="clientIp">客户端IP</param>
-    /// <param name="userAgent">用户代理</param>
-    /// <param name="endpoint">请求路径</param>
-    /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>HTTP响应</returns>
-    public async Task<ProviderHttpResponse> ProcessAnthropicRequestAsync(
-        string requestJson,
-        string proxyKey,
-        string? clientIp = null,
-        string? userAgent = null,
-        string? endpoint = null,
-        CancellationToken cancellationToken = default)
-    {
-        // 获取代理密钥ID
-        int? proxyKeyId = null;
-        if (!string.IsNullOrEmpty(proxyKey))
-        {
-            var validatedProxyKey = await _keyManager.ValidateProxyKeyAsync(proxyKey);
-            proxyKeyId = validatedProxyKey?.Id;
-        }
-
-        // 从JSON中提取模型名称用于路由
-        var requestDict = JsonConvert.DeserializeObject<Dictionary<string, object>>(requestJson)
-            ?? throw new ArgumentException("Invalid JSON format");
-        var originalModelName = requestDict.TryGetValue("model", out var modelValue)
-            ? modelValue?.ToString() ?? string.Empty
-            : string.Empty;
-
-        // 记录请求开始
-        var requestId = await _requestLogger.LogRequestStartAsync(
-            "POST",
-            endpoint,
-            requestJson,
-            null,
-            proxyKeyId,
-            clientIp,
-            userAgent);
-
-        try
-        {
-            _logger.LogInformation("开始处理Anthropic原生HTTP透明代理请求 - RequestId: {RequestId}",
-                requestId);
-
-            // 获取最大服务商重试个数配置
-            var maxProviderRetries = _configuration.GetValue<int>("OrchestrationApi:Global:MaxProviderRetries", 3);
-            var triedProviders = new HashSet<string>();
-            var failedGroups = new HashSet<string>();
-            Exception? lastException = null;
-
-            for (int providerAttempt = 0; providerAttempt < maxProviderRetries; providerAttempt++)
-            {
-                string? currentGroupId = null;
-                try
-                {
-                    // 路由到Anthropic Provider
-                    var routeResult = await _router.RouteRequestAsync(originalModelName, proxyKey, "anthropic", failedGroups);
-                    if (!routeResult.Success)
-                    {
-                        var errorMessage = $"路由失败: {routeResult.ErrorMessage}";
-                        _logger.LogWarning(errorMessage);
-                        await _requestLogger.LogRequestEndAsync(requestId, 400, null, null, errorMessage);
-                        return new ProviderHttpResponse
-                        {
-                            IsSuccess = false,
-                            StatusCode = 400,
-                            ErrorMessage = errorMessage
-                        };
-                    }
-
-                    var group = routeResult.Group!;
-                    var apiKey = routeResult.ApiKey!;
-                    var resolvedModel = routeResult.ResolvedModel;
-                    var parameterOverrides = routeResult.ParameterOverrides;
-
-                    currentGroupId = group.Id;
-                    _logger.LogInformation("Anthropic原生请求路由到分组 {GroupId} (Provider: {ProviderType}) - RequestId: {RequestId}",
-                        group.Id, group.ProviderType, requestId);
-
-                    // 创建Provider实例
-                    var provider = _providerFactory.GetProvider(group.ProviderType);
-                    if (provider == null)
-                    {
-                        var errorMessage = $"不支持的Provider类型: {group.ProviderType}";
-                        _logger.LogError(errorMessage);
-                        await _requestLogger.LogRequestEndAsync(requestId, 500, null, null, errorMessage);
-                        return new ProviderHttpResponse
-                        {
-                            IsSuccess = false,
-                            StatusCode = 500,
-                            ErrorMessage = errorMessage
-                        };
-                    }
-
-                    // 应用模型解析到请求字典
-                    requestDict["model"] = resolvedModel;
-
-                    // 序列化修改后的请求
-                    var modifiedRequestJson = JsonConvert.SerializeObject(requestDict);
-
-                    // 构建Provider配置（参数覆盖将在Provider中处理）
-                    var providerConfig = new ProviderConfig
-                    {
-                        ApiKeys = await _keyManager.GetGroupApiKeysAsync(group.Id),
-                        BaseUrl = group.BaseUrl,
-                        TimeoutSeconds = group.Timeout, // 向后兼容
-                ConnectionTimeoutSeconds = _configuration.GetValue<int>("OrchestrationApi:Global:ConnectionTimeout", 30),
-                ResponseTimeoutSeconds = _configuration.GetValue<int>("OrchestrationApi:Global:ResponseTimeout", 300),
-                        MaxRetries = group.RetryCount,
-                        Headers = JsonConvert.DeserializeObject<Dictionary<string, string>>(group.Headers ?? "{}") ?? new Dictionary<string, string>(),
-                        ModelAliases = JsonConvert.DeserializeObject<Dictionary<string, string>>(group.ModelAliases ?? "{}") ?? new Dictionary<string, string>(),
-                        ParameterOverrides = parameterOverrides,
-                        GroupId = group.Id,
-                        GroupName = group.GroupName,
-                        ProxyConfig = ParseProxyConfig(group)
-                    };
-
-                    _logger.LogDebug("直接调用AnthropicProvider(JSON透传) - RequestId: {RequestId}, Provider: {ProviderType}, GroupId: {GroupId}",
-                        requestId, group.ProviderType, group.Id);
-
-                    // 准备Anthropic原生请求内容（JSON透传模式）
-                    var httpContent = await ((AnthropicProvider)provider).PrepareAnthropicRequestContentFromJsonAsync(modifiedRequestJson, providerConfig, cancellationToken);
-
-                    // 从字典获取stream值
-                    var isStreaming = requestDict.TryGetValue("stream", out var streamValue) &&
-                                     streamValue is bool streamBool && streamBool;
-                    // 注意：假流模式需要发送非流式请求到上游
-                    var actualIsStreaming = providerConfig.FakeStreaming ? false : isStreaming;
-                    var httpResponse = await provider.SendHttpRequestAsync(
-                        httpContent, apiKey, providerConfig, actualIsStreaming, cancellationToken);
-
-                    if (httpResponse.IsSuccess)
-                    {
-                        // 成功响应，重置密钥错误计数
-                        await _keyManager.ResetKeyErrorCountAsync(group.Id, apiKey);
-                        await _keyManager.UpdateKeyUsageStatsAsync(group.Id, apiKey);
-
-                        // 记录成功日志
-                        await _requestLogger.LogRequestEndAsync(requestId, httpResponse.StatusCode,
-                            null, // HTTP透明代理模式不记录响应体内容，保持透传性能
-                            httpResponse.Headers,
-                            null, // no error message
-                            null, null, null, // token信息在HTTP透明代理模式下无法准确获取
-                            group.Id,
-                            group.ProviderType,
-                            originalModelName, // 使用原始模型名称
-                            false, // Anthropic请求通常没有tools
-                            isStreaming,
-                            apiKey);
-
-                        return httpResponse;
-                    }
-                    else
-                    {
-                        // 请求失败，记录错误
-                        await _keyManager.ReportKeyErrorAsync(group.Id, apiKey, httpResponse.ErrorMessage ?? "Unknown error");
-
-                        if (httpResponse.ShouldTryNextKey || httpResponse.ShouldRetry)
-                        {
-                            failedGroups.Add(group.Id);
-                            _logger.LogWarning("Anthropic原生请求失败，将重试 - Provider: {ProviderType}, 状态码: {StatusCode}, 错误: {Error}",
-                                group.ProviderType, httpResponse.StatusCode, httpResponse.ErrorMessage);
-                            continue;
-                        }
-
-                        // 不可重试的错误，直接返回
-                        await _requestLogger.LogRequestEndAsync(requestId, httpResponse.StatusCode,
-                            null, // HTTP透明代理模式不记录响应体内容
-                            httpResponse.Headers,
-                            httpResponse.ErrorMessage,
-                            null, null, null, // token信息在HTTP透明代理模式下无法准确获取
-                            group.Id,
-                            group.ProviderType,
-                            originalModelName, // 使用原始模型名称
-                            false, // Anthropic请求通常没有tools
-                            isStreaming,
-                            apiKey);
-                        return httpResponse;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    lastException = ex;
-                    _logger.LogError(ex, "Anthropic原生请求处理异常 - RequestId: {RequestId}, Provider尝试: {Attempt}",
-                        requestId, providerAttempt + 1);
-
-                    if (!string.IsNullOrEmpty(currentGroupId))
-                    {
-                        failedGroups.Add(currentGroupId);
-                    }
-                }
-            }
-
-            // 所有重试都失败了
-            var finalErrorMessage = $"所有Provider重试均失败。最后异常: {lastException?.Message}";
-            _logger.LogError("Anthropic原生请求最终失败 - RequestId: {RequestId}, 错误: {Error}", requestId, finalErrorMessage);
-            await _requestLogger.LogRequestEndAsync(requestId, 500,
-                null, // no response body
-                null, // no response headers
-                finalErrorMessage,
-                null, null, null, // no token info
-                null, // no group id available since all providers failed
-                null, // no provider type available
-                originalModelName, // 使用原始模型名称
-                false, // Anthropic请求通常没有tools
-                false, // 假设流式失败
-                null); // no api key available since all providers failed
-
-            return new ProviderHttpResponse
-            {
-                IsSuccess = false,
-                StatusCode = 500,
-                ErrorMessage = finalErrorMessage
-            };
-        }
-        catch (Exception ex)
-        {
-            var errorMessage = $"Anthropic原生请求处理异常: {ex.Message}";
-            _logger.LogError(ex, errorMessage + " - RequestId: {RequestId}", requestId);
-            await _requestLogger.LogRequestEndAsync(requestId, 500,
-                null, // no response body
-                null, // no response headers
-                errorMessage,
-                null, null, null, // no token info
-                null, // no group id available due to exception
-                null, // no provider type available
-                originalModelName, // 使用原始模型名称
-                false, // Anthropic请求通常没有tools
-                false, // 假设流式失败
-                null); // no api key available due to exception
-
-            return new ProviderHttpResponse
-            {
-                IsSuccess = false,
-                StatusCode = 500,
-                ErrorMessage = errorMessage
             };
         }
     }
@@ -2324,6 +1695,7 @@ public class MultiProviderService : IMultiProviderService
                                 Text = content.Text
                             });
                             break;
+
                         case "input_image":
                             // Anthropic图像格式需要base64数据
                             anthropicMessage.Content.Add(new AnthropicContent
@@ -2337,6 +1709,7 @@ public class MultiProviderService : IMultiProviderService
                                 }
                             });
                             break;
+
                         case "input_file":
                             // 文件内容转为文本
                             anthropicMessage.Content.Add(new AnthropicContent
@@ -2452,6 +1825,7 @@ public class MultiProviderService : IMultiProviderService
                         case "input_text":
                             geminiContent.Parts.Add(new GeminiPart { Text = content.Text });
                             break;
+
                         case "input_image":
                             // Gemini图像格式
                             geminiContent.Parts.Add(new GeminiPart
@@ -2463,6 +1837,7 @@ public class MultiProviderService : IMultiProviderService
                                 }
                             });
                             break;
+
                         case "input_file":
                             // 文件内容转为文本
                             geminiContent.Parts.Add(new GeminiPart { Text = $"File: {content.FileUrl}" });
@@ -2569,7 +1944,7 @@ public class MultiProviderService : IMultiProviderService
                 };
 
                 // 处理多模态内容
-                if (inputMessage.Content.Count == 1 && 
+                if (inputMessage.Content.Count == 1 &&
                     inputMessage.Content[0].Type == "input_text")
                 {
                     // 单纯文本内容
@@ -2579,7 +1954,7 @@ public class MultiProviderService : IMultiProviderService
                 {
                     // 多模态内容，转换为OpenAI格式
                     var contentArray = new List<object>();
-                    
+
                     foreach (var content in inputMessage.Content)
                     {
                         switch (content.Type)
@@ -2591,6 +1966,7 @@ public class MultiProviderService : IMultiProviderService
                                     text = content.Text
                                 });
                                 break;
+
                             case "input_image":
                                 contentArray.Add(new
                                 {
@@ -2598,6 +1974,7 @@ public class MultiProviderService : IMultiProviderService
                                     image_url = new { url = content.ImageUrl }
                                 });
                                 break;
+
                             case "input_file":
                                 // 文件类型需要根据具体Provider处理，这里先作为文本处理
                                 contentArray.Add(new
@@ -2608,7 +1985,7 @@ public class MultiProviderService : IMultiProviderService
                                 break;
                         }
                     }
-                    
+
                     chatMessage.Content = contentArray;
                 }
 
@@ -2639,6 +2016,7 @@ public class MultiProviderService : IMultiProviderService
                             }
                         });
                         break;
+
                     case "web_search_preview":
                         // Web搜索工具，转换为函数调用
                         chatTools.Add(new ChatTool
@@ -2664,6 +2042,7 @@ public class MultiProviderService : IMultiProviderService
                             }
                         });
                         break;
+
                     case "file_search":
                         // 文件搜索工具
                         chatTools.Add(new ChatTool
@@ -2775,7 +2154,7 @@ public class MultiProviderService : IMultiProviderService
                 // 读取响应流内容
                 using var reader = new StreamReader(response.ResponseStream);
                 var responseBody = await reader.ReadToEndAsync();
-                
+
                 if (!string.IsNullOrEmpty(responseBody))
                 {
                     // 解析响应并返回
@@ -2784,7 +2163,7 @@ public class MultiProviderService : IMultiProviderService
                     return apiResponse;
                 }
             }
-            
+
             _logger.LogWarning("检索响应失败 - ResponseId: {ResponseId}, StatusCode: {StatusCode}, Error: {Error}",
                 responseId, response.StatusCode, response.ErrorMessage);
             return null;
@@ -2929,7 +2308,7 @@ public class MultiProviderService : IMultiProviderService
                 // 读取响应流内容
                 using var reader = new StreamReader(response.ResponseStream);
                 var responseBody = await reader.ReadToEndAsync();
-                
+
                 if (!string.IsNullOrEmpty(responseBody))
                 {
                     // 解析响应并返回
@@ -2938,7 +2317,7 @@ public class MultiProviderService : IMultiProviderService
                     return apiResponse;
                 }
             }
-            
+
             _logger.LogWarning("取消响应失败 - ResponseId: {ResponseId}, StatusCode: {StatusCode}, Error: {Error}",
                 responseId, response.StatusCode, response.ErrorMessage);
             return null;
@@ -2949,5 +2328,4 @@ public class MultiProviderService : IMultiProviderService
             return null;
         }
     }
-
 }

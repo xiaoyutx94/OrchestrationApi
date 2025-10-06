@@ -48,26 +48,10 @@ public interface IRequestLogger
         string? groupId = null, string? providerType = null, string? model = null, bool hasTools = false, bool isStreaming = false, string? openrouterKey = null);
 
     /// <summary>
-    /// 获取请求日志
-    /// </summary>
-    Task<PagedLogsResult> GetLogsAsync(int page = 1, int pageSize = 20, string? proxyKeyFilter = null, 
-        string? groupFilter = null, string? modelFilter = null, string? statusFilter = null, string? typeFilter = null);
-
-    /// <summary>
     /// 获取请求日志 - 返回前端格式DTO
     /// </summary>
     Task<PagedLogsDtoResult> GetLogsDtoAsync(int page = 1, int pageSize = 20, string? proxyKeyFilter = null, 
         string? groupFilter = null, string? modelFilter = null, string? statusFilter = null, string? typeFilter = null);
-
-    /// <summary>
-    /// 获取指定时间范围的日志
-    /// </summary>
-    Task<List<RequestLog>> GetLogsByDateRangeAsync(DateTime startDate, DateTime endDate, int page = 1, int pageSize = 20);
-
-    /// <summary>
-    /// 获取指定分组的日志
-    /// </summary>
-    Task<List<RequestLog>> GetLogsByGroupAsync(string groupId, int page = 1, int pageSize = 20);
 
     /// <summary>
     /// 获取日志统计信息
@@ -108,11 +92,6 @@ public interface IRequestLogger
     /// 批量删除指定ID的日志
     /// </summary>
     Task<int> BatchDeleteLogsAsync(List<int> ids);
-
-    /// <summary>
-    /// 根据ID获取单个日志详情
-    /// </summary>
-    Task<RequestLog?> GetLogByIdAsync(int id);
 
     /// <summary>
     /// 根据ID获取单个日志详情DTO
@@ -443,80 +422,6 @@ public class RequestLogger : IRequestLogger
             .ExecuteCommandAsync();
     }
 
-    public async Task<PagedLogsResult> GetLogsAsync(int page = 1, int pageSize = 20, string? proxyKeyFilter = null,
-        string? groupFilter = null, string? modelFilter = null, string? statusFilter = null, string? typeFilter = null)
-    {
-        try
-        {
-            var query = _db.Queryable<RequestLog>();
-
-            if (!string.IsNullOrEmpty(proxyKeyFilter) && proxyKeyFilter != "所有密钥")
-            {
-                if (int.TryParse(proxyKeyFilter, out int keyId))
-                {
-                    query = query.Where(rl => rl.ProxyKeyId == keyId);
-                }
-            }
-
-            if (!string.IsNullOrEmpty(groupFilter) && groupFilter != "所有分组")
-            {
-                query = query.Where(rl => rl.GroupId == groupFilter);
-            }
-
-            if (!string.IsNullOrEmpty(modelFilter) && modelFilter != "所有模型")
-            {
-                query = query.Where(rl => rl.Model == modelFilter);
-            }
-
-            if (!string.IsNullOrEmpty(statusFilter) && statusFilter != "所有状态")
-            {
-                if (statusFilter == "成功 (200)")
-                {
-                    query = query.Where(rl => rl.StatusCode >= 200 && rl.StatusCode < 300);
-                }
-                else if (statusFilter == "错误 (非200)")
-                {
-                    query = query.Where(rl => rl.StatusCode < 200 || rl.StatusCode >= 300);
-                }
-            }
-
-            if (!string.IsNullOrEmpty(typeFilter) && typeFilter != "所有类型")
-            {
-                if (typeFilter == "流式")
-                {
-                    query = query.Where(rl => rl.IsStreaming);
-                }
-                else if (typeFilter == "非流式")
-                {
-                    query = query.Where(rl => !rl.IsStreaming);
-                }
-            }
-
-            // 获取总数
-            var totalCount = await query.CountAsync();
-
-            // 获取分页数据
-            var logs = await query
-                .OrderByDescending(rl => rl.CreatedAt)
-                .ToPageListAsync(page, pageSize);
-
-            return new PagedLogsResult
-            {
-                Logs = logs,
-                TotalCount = totalCount
-            };
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "获取请求日志时发生异常");
-            return new PagedLogsResult
-            {
-                Logs = new List<RequestLog>(),
-                TotalCount = 0
-            };
-        }
-    }
-
     public async Task<PagedLogsDtoResult> GetLogsDtoAsync(int page = 1, int pageSize = 20, string? proxyKeyFilter = null,
         string? groupFilter = null, string? modelFilter = null, string? statusFilter = null, string? typeFilter = null)
     {
@@ -634,38 +539,6 @@ public class RequestLogger : IRequestLogger
                 Logs = new List<LogResponseDto>(),
                 TotalCount = 0
             };
-        }
-    }
-
-    public async Task<List<RequestLog>> GetLogsByDateRangeAsync(DateTime startDate, DateTime endDate, int page = 1, int pageSize = 20)
-    {
-        try
-        {
-            return await _db.Queryable<RequestLog>()
-                .Where(rl => rl.CreatedAt >= startDate && rl.CreatedAt <= endDate)
-                .OrderByDescending(rl => rl.CreatedAt)
-                .ToPageListAsync(page, pageSize);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "获取指定时间范围的日志时发生异常");
-            return new List<RequestLog>();
-        }
-    }
-
-    public async Task<List<RequestLog>> GetLogsByGroupAsync(string groupId, int page = 1, int pageSize = 20)
-    {
-        try
-        {
-            return await _db.Queryable<RequestLog>()
-                .Where(rl => rl.GroupId == groupId)
-                .OrderByDescending(rl => rl.CreatedAt)
-                .ToPageListAsync(page, pageSize);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "获取指定分组的日志时发生异常");
-            return new List<RequestLog>();
         }
     }
 
@@ -886,21 +759,6 @@ public class RequestLogger : IRequestLogger
         {
             _logger.LogError(ex, "批量删除日志时发生异常，尝试删除的ID: {Ids}", string.Join(", ", ids));
             throw;
-        }
-    }
-
-    public async Task<RequestLog?> GetLogByIdAsync(int id)
-    {
-        try
-        {
-            return await _db.Queryable<RequestLog>()
-                .Where(rl => rl.Id == id)
-                .FirstAsync();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "根据ID获取日志详情时发生异常: {Id}", id);
-            return null;
         }
     }
 
