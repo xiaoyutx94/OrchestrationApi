@@ -227,6 +227,12 @@ app.MapGet("/logs", async context =>
     await context.Response.SendFileAsync("wwwroot/logs.html");
 });
 
+// 系统日志查看器路由
+app.MapGet("/serilog", async context =>
+{
+    await context.Response.SendFileAsync("wwwroot/serilog.html");
+});
+
 // 健康检查报表路由
 app.MapGet("/health-report", async context =>
 {

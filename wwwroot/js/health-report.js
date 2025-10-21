@@ -533,7 +533,8 @@ function healthReportDashboard() {
                     return;
                 }
 
-                const response = await fetch(`/admin/groups/${groupId}/models/${modelName}`, {
+                const encodedModel = encodeURIComponent(modelName);
+                const response = await fetch(`/admin/groups/${groupId}/models/${encodedModel}`, {
                     method: 'DELETE',
                     headers: {
                         'Authorization': `Bearer ${token}`,

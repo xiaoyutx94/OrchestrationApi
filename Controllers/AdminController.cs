@@ -24,19 +24,22 @@ public class AdminController : ControllerBase
     private readonly ISqlSugarClient _db;
     private readonly ILogger<AdminController> _logger;
     private readonly IVersionService _versionService;
+    private readonly IConfiguration _configuration;
 
     public AdminController(
         IKeyManager keyManager,
         IRequestLogger requestLogger,
         ISqlSugarClient db,
         ILogger<AdminController> logger,
-        IVersionService versionService)
+        IVersionService versionService,
+        IConfiguration configuration)
     {
         _keyManager = keyManager;
         _requestLogger = requestLogger;
         _db = db;
         _logger = logger;
         _versionService = versionService;
+        _configuration = configuration;
     }
 
     /// <summary>
@@ -1712,11 +1715,13 @@ public class AdminController : ControllerBase
     /// <summary>
     /// 从分组中删除指定的模型（级联删除相关的健康检查记录）
     /// </summary>
-    [HttpDelete("groups/{groupId}/models/{modelId}")]
+    [HttpDelete("groups/{groupId}/models/{*modelId}")]
     public async Task<IActionResult> DeleteModelFromGroup(string groupId, string modelId)
     {
         try
         {
+            // Decode URL-encoded model id (e.g., %2F -> /)
+            modelId = Uri.UnescapeDataString(modelId);
             _logger.LogInformation("管理员请求从分组 {GroupId} 中删除模型: {ModelId}", groupId, modelId);
 
             var group = await _db.Queryable<GroupConfig>()
@@ -1889,4 +1894,299 @@ public class AdminController : ControllerBase
         var hashBytes = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(apiKey));
         return Convert.ToHexString(hashBytes);
     }
+
+    #region Serilog系统日志管理
+
+    private string GetSerilogDbPath()
+    {
+        var dbConfig = _configuration.GetValue<string>("OrchestrationApi:Database:ConnectionString");
+        if (string.IsNullOrEmpty(dbConfig))
+        {
+            return "Data/orchestration_api.db";
+        }
+        
+        var parts = dbConfig.Split(';');
+        var dataSourcePart = parts.FirstOrDefault(p => p.Trim().StartsWith("Data Source=", StringComparison.OrdinalIgnoreCase));
+        if (dataSourcePart != null)
+        {
+            return dataSourcePart.Split('=')[1].Trim();
+        }
+        
+        return "Data/orchestration_api.db";
+    }
+
+    /// <summary>
+    /// 查询Serilog系统日志
+    /// </summary>
+    [HttpGet("serilog")]
+    public async Task<IActionResult> GetSerilogLogs([FromQuery] LogQueryRequest request)
+    {
+        try
+        {
+            var response = new LogQueryResponse
+            {
+                Page = request.Page,
+                PageSize = request.PageSize
+            };
+
+            var dbPath = GetSerilogDbPath();
+            using var connection = new System.Data.SQLite.SQLiteConnection($"Data Source={dbPath};Version=3;");
+            await connection.OpenAsync();
+
+            var whereConditions = new List<string>();
+            var parameters = new List<System.Data.SQLite.SQLiteParameter>();
+
+            if (!string.IsNullOrEmpty(request.Level))
+            {
+                whereConditions.Add("Level = @Level");
+                parameters.Add(new System.Data.SQLite.SQLiteParameter("@Level", request.Level));
+            }
+
+            if (!string.IsNullOrEmpty(request.Keyword))
+            {
+                whereConditions.Add("(RenderedMessage LIKE @Keyword OR Exception LIKE @Keyword)");
+                parameters.Add(new System.Data.SQLite.SQLiteParameter("@Keyword", $"%{request.Keyword}%"));
+            }
+
+            if (request.StartTime.HasValue)
+            {
+                whereConditions.Add("Timestamp >= @StartTime");
+                parameters.Add(new System.Data.SQLite.SQLiteParameter("@StartTime", request.StartTime.Value.ToString("yyyy-MM-dd HH:mm:ss")));
+            }
+
+            if (request.EndTime.HasValue)
+            {
+                whereConditions.Add("Timestamp <= @EndTime");
+                parameters.Add(new System.Data.SQLite.SQLiteParameter("@EndTime", request.EndTime.Value.ToString("yyyy-MM-dd HH:mm:ss")));
+            }
+
+            var whereClause = whereConditions.Count > 0 ? $"WHERE {string.Join(" AND ", whereConditions)}" : "";
+
+            var countSql = $"SELECT COUNT(*) FROM orch_logs {whereClause}";
+            using (var countCmd = new System.Data.SQLite.SQLiteCommand(countSql, connection))
+            {
+                foreach (var param in parameters)
+                {
+                    countCmd.Parameters.Add(new System.Data.SQLite.SQLiteParameter(param.ParameterName, param.Value));
+                }
+                response.Total = Convert.ToInt32(await countCmd.ExecuteScalarAsync());
+            }
+
+            response.TotalPages = (int)Math.Ceiling(response.Total / (double)request.PageSize);
+
+            var offset = (request.Page - 1) * request.PageSize;
+            var querySql = $@"
+                SELECT Id, Timestamp, Level, RenderedMessage, Exception, Properties
+                FROM orch_logs
+                {whereClause}
+                ORDER BY Timestamp DESC
+                LIMIT @Limit OFFSET @Offset";
+
+            using (var queryCmd = new System.Data.SQLite.SQLiteCommand(querySql, connection))
+            {
+                foreach (var param in parameters)
+                {
+                    queryCmd.Parameters.Add(new System.Data.SQLite.SQLiteParameter(param.ParameterName, param.Value));
+                }
+                queryCmd.Parameters.Add(new System.Data.SQLite.SQLiteParameter("@Limit", request.PageSize));
+                queryCmd.Parameters.Add(new System.Data.SQLite.SQLiteParameter("@Offset", offset));
+
+                using var reader = await queryCmd.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                {
+                    response.Logs.Add(new SerilogLog
+                    {
+                        Id = reader.GetInt32(0),
+                        Timestamp = DateTime.Parse(reader.GetString(1)),
+                        Level = reader.IsDBNull(2) ? null : reader.GetString(2),
+                        Message = reader.IsDBNull(3) ? null : reader.GetString(3),
+                        Exception = reader.IsDBNull(4) ? null : reader.GetString(4),
+                        Properties = reader.IsDBNull(5) ? null : reader.GetString(5),
+                        LogEvent = null // Serilog.Sinks.SQLite不存储MessageTemplate
+                    });
+                }
+            }
+
+            return Ok(response);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "查询Serilog日志失败");
+            return StatusCode(500, new { error = "查询日志失败", message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// 获取Serilog日志统计信息
+    /// </summary>
+    [HttpGet("serilog/statistics")]
+    public async Task<IActionResult> GetSerilogStatistics()
+    {
+        try {
+            var stats = new LogStatistics();
+            var dbPath = GetSerilogDbPath();
+            
+            using var connection = new System.Data.SQLite.SQLiteConnection($"Data Source={dbPath};Version=3;");
+            await connection.OpenAsync();
+
+            using (var cmd = new System.Data.SQLite.SQLiteCommand("SELECT COUNT(*) FROM orch_logs", connection))
+            {
+                stats.TotalLogs = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+            }
+
+            using (var cmd = new System.Data.SQLite.SQLiteCommand("SELECT Level, COUNT(*) FROM orch_logs GROUP BY Level", connection))
+            {
+                using var reader = await cmd.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                {
+                    var level = reader.IsDBNull(0) ? "Unknown" : reader.GetString(0);
+                    var count = reader.GetInt32(1);
+                    stats.LogsByLevel[level] = count;
+                }
+            }
+
+            var last24Hours = DateTime.Now.AddHours(-24).ToString("yyyy-MM-dd HH:mm:ss");
+            using (var cmd = new System.Data.SQLite.SQLiteCommand($"SELECT COUNT(*) FROM orch_logs WHERE Timestamp >= @Time", connection))
+            {
+                cmd.Parameters.Add(new System.Data.SQLite.SQLiteParameter("@Time", last24Hours));
+                stats.Last24Hours = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+            }
+
+            var lastHour = DateTime.Now.AddHours(-1).ToString("yyyy-MM-dd HH:mm:ss");
+            using (var cmd = new System.Data.SQLite.SQLiteCommand($"SELECT COUNT(*) FROM orch_logs WHERE Timestamp >= @Time", connection))
+            {
+                cmd.Parameters.Add(new System.Data.SQLite.SQLiteParameter("@Time", lastHour));
+                stats.LastHour = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+            }
+
+            using (var cmd = new System.Data.SQLite.SQLiteCommand("SELECT MIN(Timestamp), MAX(Timestamp) FROM orch_logs", connection))
+            {
+                using var reader = await cmd.ExecuteReaderAsync();
+                if (await reader.ReadAsync())
+                {
+                    if (!reader.IsDBNull(0))
+                        stats.EarliestLog = DateTime.Parse(reader.GetString(0));
+                    if (!reader.IsDBNull(1))
+                        stats.LatestLog = DateTime.Parse(reader.GetString(1));
+                }
+            }
+
+            if (System.IO.File.Exists(dbPath))
+            {
+                stats.DatabaseSize = new FileInfo(dbPath).Length;
+            }
+
+            return Ok(stats);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "获取Serilog日志统计信息失败");
+            return StatusCode(500, new { error = "获取统计信息失败", message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// 获取Serilog日志级别列表
+    /// </summary>
+    [HttpGet("serilog/levels")]
+    public async Task<IActionResult> GetSerilogLevels()
+    {
+        try
+        {
+            var levels = new List<string>();
+            var dbPath = GetSerilogDbPath();
+
+            using var connection = new System.Data.SQLite.SQLiteConnection($"Data Source={dbPath};Version=3;");
+            await connection.OpenAsync();
+
+            using var cmd = new System.Data.SQLite.SQLiteCommand("SELECT DISTINCT Level FROM orch_logs ORDER BY Level", connection);
+            using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                if (!reader.IsDBNull(0))
+                {
+                    levels.Add(reader.GetString(0));
+                }
+            }
+
+            return Ok(levels);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "获取Serilog日志级别列表失败");
+            return StatusCode(500, new { error = "获取级别列表失败", message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// 删除指定时间之前的Serilog日志
+    /// </summary>
+    [HttpDelete("serilog")]
+    public async Task<IActionResult> DeleteSerilogLogs([FromQuery] DateTime? before)
+    {
+        try
+        {
+            if (!before.HasValue)
+            {
+                return BadRequest(new { error = "必须指定删除截止时间" });
+            }
+
+            var dbPath = GetSerilogDbPath();
+            using var connection = new System.Data.SQLite.SQLiteConnection($"Data Source={dbPath};Version=3;");
+            await connection.OpenAsync();
+
+            var deleteSql = "DELETE FROM orch_logs WHERE Timestamp < @Time";
+            using var cmd = new System.Data.SQLite.SQLiteCommand(deleteSql, connection);
+            cmd.Parameters.Add(new System.Data.SQLite.SQLiteParameter("@Time", before.Value.ToString("yyyy-MM-dd HH:mm:ss")));
+            
+            var deletedCount = await cmd.ExecuteNonQueryAsync();
+
+            using var vacuumCmd = new System.Data.SQLite.SQLiteCommand("VACUUM", connection);
+            await vacuumCmd.ExecuteNonQueryAsync();
+
+            _logger.LogInformation("删除了 {Count} 条Serilog日志记录", deletedCount);
+
+            return Ok(new { deletedCount, message = $"成功删除 {deletedCount} 条日志记录" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "删除Serilog日志失败");
+            return StatusCode(500, new { error = "删除日志失败", message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// 清空所有Serilog日志
+    /// </summary>
+    [HttpDelete("serilog/clear")]
+    public async Task<IActionResult> ClearSerilogLogs()
+    {
+        try
+        {
+            var dbPath = GetSerilogDbPath();
+            using var connection = new System.Data.SQLite.SQLiteConnection($"Data Source={dbPath};Version=3;");
+            await connection.OpenAsync();
+
+            using (var cmd = new System.Data.SQLite.SQLiteCommand("DELETE FROM orch_logs", connection))
+            {
+                await cmd.ExecuteNonQueryAsync();
+            }
+
+            using (var vacuumCmd = new System.Data.SQLite.SQLiteCommand("VACUUM", connection))
+            {
+                await vacuumCmd.ExecuteNonQueryAsync();
+            }
+
+            _logger.LogWarning("已清空所有Serilog日志记录");
+
+            return Ok(new { message = "已清空所有日志记录" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "清空Serilog日志失败");
+            return StatusCode(500, new { error = "清空日志失败", message = ex.Message });
+        }
+    }
+
+    #endregion Serilog系统日志管理
 }

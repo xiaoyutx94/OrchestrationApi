@@ -658,6 +658,10 @@ function multiProviderDashboard() {
                     const data = await response.json();
                     this.providerStatuses = data.groups || {};
                     this.filterProviders();
+                    // 如果已有密钥状态数据，重新计算统计（排除已禁用的分组）
+                    if (this.keyStatus.groups && Object.keys(this.keyStatus.groups).length > 0) {
+                        this.recalculateKeyStatus();
+                    }
                     // this.showMessage('服务商分组状态已更新', 'success');
                 } else {
                     throw new Error("获取服务商分组状态失败");
@@ -752,8 +756,9 @@ function multiProviderDashboard() {
 
                     await showAlert(message, 'success', '清除无效密钥完成');
 
-                    // 刷新分组状态
+                    // 刷新分组状态和密钥状态
                     await this.loadProviderStatuses();
+                    await this.refreshAllKeyStatus(false); // 静默刷新密钥状态
                     this.lastUpdate = new Date();
                 } else {
                     throw new Error(result.message || '清除无效密钥失败');
@@ -809,8 +814,17 @@ function multiProviderDashboard() {
 
                     await showAlert(message, 'success', '清除空白分组完成');
 
-                    // 刷新分组状态
+                    // 刷新分组状态（会自动触发密钥状态重新计算）
                     await this.loadProviderStatuses();
+                    // 由于删除了分组，也需要清理密钥状态数据
+                    if (result.cleared_groups && result.cleared_groups.length > 0) {
+                        result.cleared_groups.forEach(group => {
+                            if (this.keyStatus.groups && this.keyStatus.groups[group.id]) {
+                                delete this.keyStatus.groups[group.id];
+                            }
+                        });
+                        this.recalculateKeyStatus();
+                    }
                     this.lastUpdate = new Date();
                 } else {
                     // 处理错误
@@ -1027,16 +1041,20 @@ function multiProviderDashboard() {
                 if (response.ok) {
                     const data = await response.json();
                     if (data.success) {
-                        // 计算总计数据
+                        // 计算总计数据（排除已禁用的分组）
                         let totalKeys = 0;
                         let totalValid = 0;
                         let totalInvalid = 0;
 
                         for (const groupId in data.data) {
                             const groupData = data.data[groupId];
-                            totalKeys += groupData.total_keys;
-                            totalValid += groupData.valid_keys;
-                            totalInvalid += groupData.invalid_keys;
+                            // 检查分组是否启用，只统计启用的分组
+                            const provider = this.providerStatuses[groupId];
+                            if (provider && provider.enabled !== false) {
+                                totalKeys += groupData.total_keys;
+                                totalValid += groupData.valid_keys;
+                                totalInvalid += groupData.invalid_keys;
+                            }
                         }
 
                         this.keyStatus = {
@@ -1061,6 +1079,13 @@ function multiProviderDashboard() {
             await this.loadKeyStatus();
             // 移除自动加载验证状态，改为手动触发
             // await this.loadPersistedValidationStatus();
+        },
+
+        // 刷新密钥统计并同步持久化验证结果
+        async refreshAllKeyStatus() {
+            // 先快速统计，再合并后端持久化验证结果
+            await this.refreshKeyStatus();
+            await this.loadPersistedValidationStatus(false);
         },
 
         // 加载所有分组的持久化验证状态
@@ -1118,18 +1143,22 @@ function multiProviderDashboard() {
                     }
                 }
 
-                // 重新计算总计数据
+                // 重新计算总计数据（排除已禁用的分组）
                 if (this.keyStatus.groups) {
                     let totalKeys = 0;
                     let totalValid = 0;
                     let totalInvalid = 0;
 
-                    for (const groupData of Object.values(
+                    for (const [groupId, groupData] of Object.entries(
                         this.keyStatus.groups,
                     )) {
-                        totalKeys += groupData.total_keys || 0;
-                        totalValid += groupData.valid_keys || 0;
-                        totalInvalid += groupData.invalid_keys || 0;
+                        // 检查分组是否启用，只统计启用的分组
+                        const provider = this.providerStatuses[groupId];
+                        if (provider && provider.enabled !== false) {
+                            totalKeys += groupData.total_keys || 0;
+                            totalValid += groupData.valid_keys || 0;
+                            totalInvalid += groupData.invalid_keys || 0;
+                        }
                     }
 
                     this.keyStatus.total_keys = totalKeys;
@@ -1158,6 +1187,32 @@ function multiProviderDashboard() {
             } finally {
                 this.loadingValidation = false;
             }
+        },
+
+        // 重新计算密钥状态统计（排除已禁用的分组）
+        recalculateKeyStatus() {
+            if (!this.keyStatus.groups) {
+                return;
+            }
+
+            let totalKeys = 0;
+            let totalValid = 0;
+            let totalInvalid = 0;
+
+            for (const [groupId, groupData] of Object.entries(this.keyStatus.groups)) {
+                // 检查分组是否启用，只统计启用的分组
+                const provider = this.providerStatuses[groupId];
+                if (provider && provider.enabled !== false) {
+                    totalKeys += groupData.total_keys || 0;
+                    totalValid += groupData.valid_keys || 0;
+                    totalInvalid += groupData.invalid_keys || 0;
+                }
+            }
+
+            this.keyStatus.total_keys = totalKeys;
+            this.keyStatus.total_valid = totalValid;
+            this.keyStatus.total_invalid = totalInvalid;
+            this.keyStatus.last_updated = new Date().toLocaleString();
         },
 
         // 服务商筛选和管理方法
@@ -1710,6 +1765,8 @@ function multiProviderDashboard() {
                     this.showMessage(data.message, "success");
                     // 重新加载服务商状态以反映分组状态变化
                     await this.loadProviderStatuses();
+                    // 重新计算密钥状态统计（排除已禁用的分组）
+                    this.recalculateKeyStatus();
                 } else {
                     this.showMessage(
                         data.message || "操作失败",
@@ -1743,8 +1800,14 @@ function multiProviderDashboard() {
 
                 if (response.ok) {
                     this.showMessage("分组删除成功", "success");
+                    // 从密钥状态中移除已删除的分组
+                    if (this.keyStatus.groups && this.keyStatus.groups[groupId]) {
+                        delete this.keyStatus.groups[groupId];
+                    }
                     // 重新加载服务商状态以移除已删除的分组
                     await this.loadProviderStatuses();
+                    // 重新计算密钥状态统计
+                    this.recalculateKeyStatus();
                 } else {
                     // 只有非204响应才尝试解析JSON
                     let errorMessage = "删除失败";

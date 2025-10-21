@@ -1879,3 +1879,156 @@ public sealed class AnthropicContentListConverter : JsonConverter<List<Anthropic
         serializer.Serialize(writer, value ?? new List<AnthropicContent>());
     }
 }
+
+#region Serilog System Log Models
+
+/// <summary>
+/// Serilog日志数据库模型
+/// </summary>
+public class SerilogLog
+{
+    /// <summary>
+    /// 唯一标识
+    /// </summary>
+    public int Id { get; set; }
+
+    /// <summary>
+    /// 日志时间戳
+    /// </summary>
+    public DateTime Timestamp { get; set; }
+
+    /// <summary>
+    /// 日志级别
+    /// </summary>
+    public string? Level { get; set; }
+
+    /// <summary>
+    /// 日志消息
+    /// </summary>
+    public string? Message { get; set; }
+
+    /// <summary>
+    /// 异常信息
+    /// </summary>
+    public string? Exception { get; set; }
+
+    /// <summary>
+    /// 日志属性（JSON格式）
+    /// </summary>
+    public string? Properties { get; set; }
+
+    /// <summary>
+    /// 日志模板
+    /// </summary>
+    public string? LogEvent { get; set; }
+}
+
+/// <summary>
+/// 日志查询请求参数
+/// </summary>
+public class LogQueryRequest
+{
+    /// <summary>
+    /// 页码（从1开始）
+    /// </summary>
+    public int Page { get; set; } = 1;
+
+    /// <summary>
+    /// 每页记录数
+    /// </summary>
+    public int PageSize { get; set; } = 50;
+
+    /// <summary>
+    /// 日志级别筛选
+    /// </summary>
+    public string? Level { get; set; }
+
+    /// <summary>
+    /// 关键字搜索（搜索消息和异常）
+    /// </summary>
+    public string? Keyword { get; set; }
+
+    /// <summary>
+    /// 开始时间
+    /// </summary>
+    public DateTime? StartTime { get; set; }
+
+    /// <summary>
+    /// 结束时间
+    /// </summary>
+    public DateTime? EndTime { get; set; }
+}
+
+/// <summary>
+/// 日志查询响应
+/// </summary>
+public class LogQueryResponse
+{
+    /// <summary>
+    /// 总记录数
+    /// </summary>
+    public int Total { get; set; }
+
+    /// <summary>
+    /// 当前页码
+    /// </summary>
+    public int Page { get; set; }
+
+    /// <summary>
+    /// 每页记录数
+    /// </summary>
+    public int PageSize { get; set; }
+
+    /// <summary>
+    /// 总页数
+    /// </summary>
+    public int TotalPages { get; set; }
+
+    /// <summary>
+    /// 日志列表
+    /// </summary>
+    public List<SerilogLog> Logs { get; set; } = new();
+}
+
+/// <summary>
+/// 日志统计信息
+/// </summary>
+public class LogStatistics
+{
+    /// <summary>
+    /// 总日志数
+    /// </summary>
+    public int TotalLogs { get; set; }
+
+    /// <summary>
+    /// 按级别统计
+    /// </summary>
+    public Dictionary<string, int> LogsByLevel { get; set; } = new();
+
+    /// <summary>
+    /// 最近24小时日志数
+    /// </summary>
+    public int Last24Hours { get; set; }
+
+    /// <summary>
+    /// 最近1小时日志数
+    /// </summary>
+    public int LastHour { get; set; }
+
+    /// <summary>
+    /// 数据库大小（字节）
+    /// </summary>
+    public long DatabaseSize { get; set; }
+
+    /// <summary>
+    /// 最早日志时间
+    /// </summary>
+    public DateTime? EarliestLog { get; set; }
+
+    /// <summary>
+    /// 最新日志时间
+    /// </summary>
+    public DateTime? LatestLog { get; set; }
+}
+
+#endregion

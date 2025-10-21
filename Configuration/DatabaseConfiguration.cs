@@ -685,7 +685,7 @@ public class DatabaseInitializer : IDatabaseInitializer
     /// <summary>
     /// 当前数据库版本
     /// </summary>
-    private const string CURRENT_DATABASE_VERSION = "1.7.0";
+    private const string CURRENT_DATABASE_VERSION = "1.8.0";
 
     /// <summary>
     /// 初始化数据库版本管理表
@@ -949,6 +949,15 @@ public class DatabaseInitializer : IDatabaseInitializer
                 ExecuteAsync = async (db, logger, initializer) =>
                 {
                     await initializer.AddHealthCheckEnabledToGroupConfig();
+                }
+            },
+            new DatabaseMigration
+            {
+                Version = "1.8.0",
+                Description = "启用 Serilog 数据库日志功能，优化 orch_logs 表索引",
+                ExecuteAsync = async (db, logger, initializer) =>
+                {
+                    await initializer.OptimizeSerilogLogsTable();
                 }
             }
 
@@ -1313,6 +1322,82 @@ public class DatabaseInitializer : IDatabaseInitializer
                 _logger.LogWarning(ex, "HealthCheckStats索引创建失败，可能已存在");
             }
         }
+    }
+
+    /// <summary>
+    /// 优化 Serilog orch_logs 表索引
+    /// 注意：orch_logs 表由 Serilog.Sinks.SQLite 自动创建，此方法仅添加性能优化索引
+    /// </summary>
+    private async Task OptimizeSerilogLogsTable()
+    {
+        const string tableName = "orch_logs"; // Serilog使用配置的表名（带前缀）
+        
+        // 检查orch_logs表是否存在
+        var tableExists = await TableExists(tableName);
+        
+        if (!tableExists)
+        {
+            _logger.LogInformation("Serilog orch_logs表尚未创建，将在首次写入日志时由Serilog.Sinks.SQLite自动创建");
+            return;
+        }
+
+        var dbType = _db.CurrentConnectionConfig.DbType;
+
+        try
+        {
+            // 为 Timestamp 字段创建索引，提高按时间查询的性能
+            string createTimestampIndexSql = dbType switch
+            {
+                DbType.Sqlite => "CREATE INDEX IF NOT EXISTS idx_orch_logs_timestamp ON orch_logs(Timestamp)",
+                DbType.MySql => "CREATE INDEX idx_orch_logs_timestamp ON orch_logs(Timestamp)",
+                _ => throw new NotSupportedException($"不支持的数据库类型: {dbType}")
+            };
+
+            await _db.Ado.ExecuteCommandAsync(createTimestampIndexSql);
+            _logger.LogInformation("成功为 orch_logs 表的 Timestamp 字段创建索引");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "创建 orch_logs.Timestamp 索引失败，可能已存在");
+        }
+
+        try
+        {
+            // 为 Level 字段创建索引，提高按日志级别筛选的性能
+            string createLevelIndexSql = dbType switch
+            {
+                DbType.Sqlite => "CREATE INDEX IF NOT EXISTS idx_orch_logs_level ON orch_logs(Level)",
+                DbType.MySql => "CREATE INDEX idx_orch_logs_level ON orch_logs(Level)",
+                _ => throw new NotSupportedException($"不支持的数据库类型: {dbType}")
+            };
+
+            await _db.Ado.ExecuteCommandAsync(createLevelIndexSql);
+            _logger.LogInformation("成功为 orch_logs 表的 Level 字段创建索引");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "创建 orch_logs.Level 索引失败，可能已存在");
+        }
+
+        try
+        {
+            // 为 Timestamp 和 Level 组合创建复合索引，提高复杂查询性能
+            string createCompositeIndexSql = dbType switch
+            {
+                DbType.Sqlite => "CREATE INDEX IF NOT EXISTS idx_orch_logs_timestamp_level ON orch_logs(Timestamp, Level)",
+                DbType.MySql => "CREATE INDEX idx_orch_logs_timestamp_level ON orch_logs(Timestamp, Level)",
+                _ => throw new NotSupportedException($"不支持的数据库类型: {dbType}")
+            };
+
+            await _db.Ado.ExecuteCommandAsync(createCompositeIndexSql);
+            _logger.LogInformation("成功为 orch_logs 表创建 Timestamp-Level 复合索引");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "创建 orch_logs 复合索引失败，可能已存在");
+        }
+
+        _logger.LogInformation("Serilog orch_logs 表索引优化完成");
     }
 
     #endregion 数据库版本管理和增量更新

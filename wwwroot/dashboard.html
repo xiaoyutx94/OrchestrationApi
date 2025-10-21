@@ -105,6 +105,10 @@
                         class="bg-purple-500 hover:bg-purple-600 text-white px-3 py-2 sm:px-4 rounded-lg transition duration-200 text-center text-sm">
                         <span>请求日志</span>
                     </a>
+                    <a href="/serilog"
+                        class="bg-purple-500 hover:bg-purple-600 text-white px-3 py-2 sm:px-4 rounded-lg transition duration-200 text-center text-sm">
+                        <span>系统日志</span>
+                    </a>
                     <a href="/health-report"
                         class="bg-orange-500 hover:bg-orange-600 text-white px-3 py-2 sm:px-4 rounded-lg transition duration-200 text-center text-sm">
                         <span>健康检查结果</span>
@@ -166,25 +170,7 @@
                             <span x-show="!loadingHealthRefresh">健康检查</span>
                             <span x-show="loadingHealthRefresh">检查中</span>
                         </button>
-                        <button @click="loadSystemHealth()" :disabled="loadingSystemHealth"
-                            class="inline-flex items-center justify-center px-2 sm:px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-gray-700 bg-gray-100 hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 disabled:opacity-50 transition-all duration-200">
-                            <svg x-show="!loadingSystemHealth" class="w-3 h-3 mr-1" fill="none" stroke="currentColor"
-                                viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15">
-                                </path>
-                            </svg>
-                            <svg x-show="loadingSystemHealth" class="animate-spin w-3 h-3 mr-1" fill="none"
-                                viewBox="0 0 24 24">
-                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor"
-                                    stroke-width="4"></circle>
-                                <path class="opacity-75" fill="currentColor"
-                                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
-                                </path>
-                            </svg>
-                            <span x-show="!loadingSystemHealth">刷新</span>
-                            <span x-show="loadingSystemHealth">刷新中</span>
-                        </button>
+                        
                     </div>
                 </div>
                 <div class="space-y-2">
@@ -240,25 +226,7 @@
                             <p class="text-xl font-bold text-blue-600" x-text="systemHealth.total_groups || 0"></p>
                         </div>
                     </div>
-                    <button @click="loadProviderStatuses()" :disabled="loadingProviderStatuses"
-                        class="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-gray-700 bg-gray-100 hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 disabled:opacity-50 transition-all duration-200">
-                        <svg x-show="!loadingProviderStatuses" class="w-3 h-3 mr-1" fill="none" stroke="currentColor"
-                            viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15">
-                            </path>
-                        </svg>
-                        <svg x-show="loadingProviderStatuses" class="animate-spin w-3 h-3 mr-1" fill="none"
-                            viewBox="0 0 24 24">
-                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4">
-                            </circle>
-                            <path class="opacity-75" fill="currentColor"
-                                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
-                            </path>
-                        </svg>
-                        <span x-show="!loadingProviderStatuses">刷新</span>
-                        <span x-show="loadingProviderStatuses">刷新中</span>
-                    </button>
+                    
                 </div>
                 <div class="space-y-2">
                     <div class="flex justify-between text-sm">
@@ -308,42 +276,19 @@
                         </div>
                     </div>
                     <div class="flex space-x-2">
-                        <button @click="refreshKeyStatus()" :disabled="loadingKeyStatus"
-                            class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-lg text-purple-700 bg-purple-100 hover:bg-purple-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 disabled:opacity-50 transition-all duration-200">
-                            <svg x-show="!loadingKeyStatus" class="w-4 h-4 mr-2" fill="none" stroke="currentColor"
+                        <button @click="refreshAllKeyStatus()" :disabled="loadingKeyStatus || loadingValidation"
+                            class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-lg text-indigo-700 bg-indigo-100 hover:bg-indigo-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 transition-all duration-200">
+                            <svg x-show="!(loadingKeyStatus || loadingValidation)" class="w-4 h-4 mr-2" fill="none" stroke="currentColor"
                                 viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15">
-                                </path>
+                                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
                             </svg>
-                            <svg x-show="loadingKeyStatus" class="animate-spin w-4 h-4 mr-2" fill="none"
-                                viewBox="0 0 24 24">
-                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor"
-                                    stroke-width="4"></circle>
-                                <path class="opacity-75" fill="currentColor"
-                                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
-                                </path>
+                            <svg x-show="loadingKeyStatus || loadingValidation" class="animate-spin w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                             </svg>
-                            <span x-show="!loadingKeyStatus">实时状态</span>
-                            <span x-show="loadingKeyStatus">获取中...</span>
-                        </button>
-                        <button @click="loadPersistedValidationStatus()" :disabled="loadingValidation"
-                            class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-lg text-blue-700 bg-blue-100 hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 transition-all duration-200">
-                            <svg x-show="!loadingValidation" class="w-4 h-4 mr-2" fill="none" stroke="currentColor"
-                                viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                            </svg>
-                            <svg x-show="loadingValidation" class="animate-spin w-4 h-4 mr-2" fill="none"
-                                viewBox="0 0 24 24">
-                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor"
-                                    stroke-width="4"></circle>
-                                <path class="opacity-75" fill="currentColor"
-                                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
-                                </path>
-                            </svg>
-                            <span x-show="!loadingValidation">检查所有密钥</span>
-                            <span x-show="loadingValidation">检查中...</span>
+                            <span x-show="!(loadingKeyStatus || loadingValidation)">刷新密钥状态</span>
+                            <span x-show="loadingKeyStatus || loadingValidation">刷新中...</span>
                         </button>
                     </div>
                 </div>
@@ -1920,7 +1865,8 @@
             x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
             x-transition:leave="transition ease-in duration-200" x-transition:leave-start="opacity-100"
             x-transition:leave-end="opacity-0"
-            class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+            style="display: none;">
             <div class="bg-white rounded-lg p-6 w-full max-w-2xl">
                 <div class="flex justify-between items-center mb-4">
                     <h3 class="text-lg font-bold">批量粘贴模型重命名配置</h3>
@@ -1990,7 +1936,8 @@
             x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
             x-transition:leave="transition ease-in duration-200" x-transition:leave-start="opacity-100"
             x-transition:leave-end="opacity-0"
-            class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+            style="display: none;">
             <div class="bg-white rounded-lg p-6 w-full max-w-lg">
                 <div class="flex justify-between items-center mb-4">
                     <h3 class="text-lg font-bold">批量添加API密钥</h3>
@@ -2032,7 +1979,8 @@
             x-transition:enter="transition ease-out duration-300"
             x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
             x-transition:leave="transition ease-in duration-200" x-transition:leave-start="opacity-100"
-            x-transition:leave-end="opacity-0">
+            x-transition:leave-end="opacity-0"
+            style="display: none;">
             <div class="bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
                 <div class="px-6 py-4 border-b border-gray-200">
                     <h3 class="text-lg font-medium text-gray-900">
@@ -2079,7 +2027,8 @@
             x-transition:enter="transition ease-out duration-300"
             x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
             x-transition:leave="transition ease-in duration-200" x-transition:leave-start="opacity-100"
-            x-transition:leave-end="opacity-0">
+            x-transition:leave-end="opacity-0"
+            style="display: none;">
             <div class="bg-white rounded-lg shadow-2xl w-full max-w-6xl max-h-[90vh] flex flex-col">
                 <!-- 头部 -->
                 <div class="flex justify-between items-center p-6 border-b border-gray-200">
@@ -2742,7 +2691,8 @@
             class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
             x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0"
             x-transition:enter-end="opacity-100" x-transition:leave="transition ease-in duration-200"
-            x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0">
+            x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
+            style="display: none;">
             <div class="bg-white rounded-lg shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col">
                 <!-- Header -->
                 <div class="flex justify-between items-center p-6 border-b border-gray-200">
@@ -2911,7 +2861,8 @@
             class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
             x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0"
             x-transition:enter-end="opacity-100" x-transition:leave="transition ease-in duration-200"
-            x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0">
+            x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
+            style="display: none;">
             <div class="bg-white rounded-lg shadow-2xl w-full max-w-md">
                 <!-- Header -->
                 <div class="flex justify-between items-center p-6 border-b border-gray-200">
@@ -2967,7 +2918,8 @@
             x-transition:enter="transition ease-out duration-300"
             x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
             x-transition:leave="transition ease-in duration-200" x-transition:leave-start="opacity-100"
-            x-transition:leave-end="opacity-0">
+            x-transition:leave-end="opacity-0"
+            style="display: none;">
             <div
                 class="bg-white rounded-lg p-4 sm:p-6 w-full max-w-md shadow-xl my-4 sm:my-0 min-h-0 max-h-screen overflow-y-auto">
                 <!-- 标题区域 - 移动端优化 -->
