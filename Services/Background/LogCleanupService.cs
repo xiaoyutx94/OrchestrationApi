@@ -101,14 +101,67 @@ public class LogCleanupService : BackgroundService
         {
             _logger.LogDebug("开始执行定期日志清理...");
 
-            // 调用RequestLogger的清理方法
+            // 1. 清理请求日志 (request_logs)
             await requestLogger.CleanupOldLogsAsync();
+            
+            // 2. 清理系统日志 (orch_logs)
+            await CleanupSerilogLogsAsync();
             
             _logger.LogInformation("定期日志清理完成");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "定期日志清理过程中发生异常");
+        }
+    }
+
+    /// <summary>
+    /// 清理 Serilog 系统日志（仅支持 SQLite）
+    /// </summary>
+    private async Task CleanupSerilogLogsAsync()
+    {
+        try
+        {
+            var retentionDays = _configuration.GetValue<int>("OrchestrationApi:RequestLogging:RetentionDays", 30);
+            var connectionString = _configuration.GetValue<string>("OrchestrationApi:Database:ConnectionString");
+
+            if (string.IsNullOrEmpty(connectionString))
+            {
+                _logger.LogWarning("未配置数据库连接字符串，跳过 Serilog 日志清理");
+                return;
+            }
+
+            var cutoffDate = DateTime.UtcNow.AddDays(-retentionDays);
+
+            using var connection = new Microsoft.Data.Sqlite.SqliteConnection(connectionString);
+            await connection.OpenAsync();
+
+            // 删除过期日志
+            int deletedCount;
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = "DELETE FROM orch_logs WHERE Timestamp < @cutoffDate";
+                command.Parameters.AddWithValue("@cutoffDate", cutoffDate);
+                deletedCount = await command.ExecuteNonQueryAsync();
+            }
+
+            // 压缩数据库（释放空间）
+            if (deletedCount > 0)
+            {
+                using var vacuumCommand = connection.CreateCommand();
+                vacuumCommand.CommandText = "VACUUM";
+                await vacuumCommand.ExecuteNonQueryAsync();
+                
+                _logger.LogInformation("已清理 {Count} 条 Serilog 系统日志（保留最近 {Days} 天），数据库已压缩", deletedCount, retentionDays);
+            }
+            else
+            {
+                _logger.LogDebug("未找到需要清理的 Serilog 系统日志");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "清理 Serilog 系统日志时发生异常");
         }
     }
 }

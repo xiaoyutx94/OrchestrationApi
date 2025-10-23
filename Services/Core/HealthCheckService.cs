@@ -247,15 +247,15 @@ public class HealthCheckService : IHealthCheckService
                     500, (int)stopwatch.ElapsedMilliseconds, "不支持的服务商类型", group.ProviderType, group.BaseUrl);
             }
 
-            // 构建模型测试请求
-            var testRequest = CreateTestChatRequest(modelId);
+            // 构建模型测试请求JSON
+            var testRequestJson = CreateTestChatRequestJson(modelId);
             var providerConfig = new ProviderConfig { BaseUrl = group.BaseUrl };
 
             // 根据不同的Provider类型准备请求内容
             HttpContent content;
             try
             {
-                content = await PrepareHealthCheckRequestContentAsync(provider, testRequest, providerConfig, cancellationToken);
+                content = await PrepareHealthCheckRequestContentAsync(provider, testRequestJson, modelId, providerConfig, cancellationToken);
             }
             catch (NotSupportedException ex)
             {
@@ -345,22 +345,30 @@ public class HealthCheckService : IHealthCheckService
         }
     }
 
-    private ChatCompletionRequest CreateTestChatRequest(string modelId)
+    /// <summary>
+    /// 创建测试请求的 JSON 字符串（OpenAI 格式）
+    /// </summary>
+    private string CreateTestChatRequestJson(string modelId)
     {
-        return new ChatCompletionRequest
+        var requestDict = new Dictionary<string, object>
         {
-            Model = modelId,
-            Messages = new List<ChatMessage>
+            ["model"] = modelId,
+            ["messages"] = new List<Dictionary<string, object>>
             {
-                new ChatMessage
+                new Dictionary<string, object>
                 {
-                    Role = "user",
-                    Content = "Hello"
+                    ["role"] = "user",
+                    ["content"] = "Hello"
                 }
             },
-            MaxTokens = 1,
-            Temperature = 0.1f
+            ["max_tokens"] = 1,
+            ["temperature"] = 0.1f
         };
+        
+        return JsonConvert.SerializeObject(requestDict, new JsonSerializerSettings
+        {
+            NullValueHandling = NullValueHandling.Ignore
+        });
     }
 
     /// <summary>
@@ -368,7 +376,8 @@ public class HealthCheckService : IHealthCheckService
     /// </summary>
     private async Task<HttpContent> PrepareHealthCheckRequestContentAsync(
         ILLMProvider provider,
-        ChatCompletionRequest testRequest,
+        string testRequestJson,
+        string modelId,
         ProviderConfig providerConfig,
         CancellationToken cancellationToken)
     {
@@ -376,54 +385,72 @@ public class HealthCheckService : IHealthCheckService
         switch (provider)
         {
             case AnthropicProvider anthropicProvider:
-                // 将ChatCompletionRequest转换为Anthropic JSON格式（字典透传）
-                var anthropicRequestJson = ConvertChatRequestToAnthropicJson(testRequest);
+                // 将OpenAI格式的JSON转换为Anthropic JSON格式
+                var anthropicRequestJson = ConvertOpenAiJsonToAnthropicJson(testRequestJson);
                 return await anthropicProvider.PrepareAnthropicRequestContentFromJsonAsync(anthropicRequestJson, providerConfig, cancellationToken);
 
             default:
-                // 对于其他Provider（OpenAI、Gemini等），使用标准方法
-                return await provider.PrepareRequestContentAsync(testRequest, providerConfig, cancellationToken);
+                // 对于其他Provider（OpenAI、Gemini等），使用JSON透传方法
+                return await provider.PrepareRequestContentFromJsonAsync(testRequestJson, providerConfig, cancellationToken);
         }
     }
 
     /// <summary>
-    /// 将ChatCompletionRequest转换为Anthropic JSON格式（字典模式）
+    /// 将OpenAI格式的JSON转换为Anthropic JSON格式（字典模式）
     /// </summary>
-    private string ConvertChatRequestToAnthropicJson(ChatCompletionRequest request)
+    private string ConvertOpenAiJsonToAnthropicJson(string openAiJson)
     {
-        var anthropicMessages = new List<Dictionary<string, object>>();
-
-        foreach (var message in request.Messages)
+        var openAiRequest = JsonConvert.DeserializeObject<Dictionary<string, object>>(openAiJson);
+        if (openAiRequest == null)
         {
-            var anthropicMessage = new Dictionary<string, object>
+            throw new ArgumentException("Invalid OpenAI JSON format");
+        }
+
+        var anthropicMessages = new List<Dictionary<string, object>>();
+        
+        // 提取 messages
+        if (openAiRequest.TryGetValue("messages", out var messagesObj) && messagesObj is Newtonsoft.Json.Linq.JArray messagesArray)
+        {
+            foreach (var msgToken in messagesArray)
             {
-                ["role"] = message.Role,
-                ["content"] = new List<Dictionary<string, object>>
+                var msg = msgToken.ToObject<Dictionary<string, object>>();
+                if (msg != null)
                 {
-                    new Dictionary<string, object>
+                    var anthropicMessage = new Dictionary<string, object>
                     {
-                        ["type"] = "text",
-                        ["text"] = message.Content?.ToString() ?? ""
-                    }
+                        ["role"] = msg.GetValueOrDefault("role", "user"),
+                        ["content"] = new List<Dictionary<string, object>>
+                        {
+                            new Dictionary<string, object>
+                            {
+                                ["type"] = "text",
+                                ["text"] = msg.GetValueOrDefault("content", "")?.ToString() ?? ""
+                            }
+                        }
+                    };
+                    anthropicMessages.Add(anthropicMessage);
                 }
-            };
-            anthropicMessages.Add(anthropicMessage);
+            }
         }
 
         var anthropicRequest = new Dictionary<string, object>
         {
-            ["model"] = request.Model,
-            ["max_tokens"] = request.MaxTokens ?? 1,
+            ["model"] = openAiRequest.GetValueOrDefault("model", ""),
+            ["max_tokens"] = openAiRequest.GetValueOrDefault("max_tokens", 1),
             ["messages"] = anthropicMessages,
             ["stream"] = false // 健康检查不使用流式
         };
 
-        if (request.Temperature.HasValue)
+        // 如果OpenAI请求中有temperature参数，添加到Anthropic请求中
+        if (openAiRequest.ContainsKey("temperature"))
         {
-            anthropicRequest["temperature"] = request.Temperature.Value;
+            anthropicRequest["temperature"] = openAiRequest["temperature"];
         }
 
-        return JsonConvert.SerializeObject(anthropicRequest);
+        return JsonConvert.SerializeObject(anthropicRequest, new JsonSerializerSettings
+        {
+            NullValueHandling = NullValueHandling.Ignore
+        });
     }
 
     private async Task<GroupConfig?> GetGroupConfigAsync(string groupId)

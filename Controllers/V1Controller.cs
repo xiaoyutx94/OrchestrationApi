@@ -242,12 +242,13 @@ public class V1Controller : ControllerBase
                 rawJsonBody = await reader.ReadToEndAsync();
             }
 
-            // 手动反序列化请求对象
-            ResponsesRequest request;
+            // 验证JSON格式并解析关键字段
+            bool isStreaming = false;
             try
             {
-                request = JsonConvert.DeserializeObject<ResponsesRequest>(rawJsonBody)
-                    ?? throw new ArgumentException("Invalid JSON format");
+                // 验证JSON格式并解析stream字段
+                dynamic? requestObj = JsonConvert.DeserializeObject<dynamic>(rawJsonBody);
+                isStreaming = requestObj?.stream == true;
             }
             catch (JsonException ex)
             {
@@ -280,12 +281,12 @@ public class V1Controller : ControllerBase
             // 根据请求路径动态确定provider类型
             var providerType = GetProviderTypeFromPath(httpRequest.Path);
 
-            _logger.LogDebug("接收到Responses请求 - Model: {Model}, Stream: {Stream}, ProxyKey: {ProxyKey}, ProviderType: {ProviderType}，原始请求：{RawRequest}",
-                request.Model, request.Stream, string.IsNullOrEmpty(proxyKey) ? "无" : "已提供", providerType, rawJsonBody);
+            _logger.LogDebug("接收到Responses请求 - ProxyKey: {ProxyKey}, ProviderType: {ProviderType}，原始请求：{RawRequest}",
+                string.IsNullOrEmpty(proxyKey) ? "无" : "已提供", providerType, rawJsonBody);
 
-            // 使用透明HTTP代理处理Responses请求
+            // 使用透明HTTP代理处理Responses请求（JSON透传模式）
             var httpResponse = await _multiProviderService.ProcessResponsesHttpAsync(
-                request, proxyKey, providerType, clientIp, userAgent, httpRequest.Path, HttpContext.RequestAborted);
+                rawJsonBody, proxyKey, providerType, clientIp, userAgent, httpRequest.Path, HttpContext.RequestAborted);
 
             if (!httpResponse.IsSuccess)
             {
@@ -302,7 +303,7 @@ public class V1Controller : ControllerBase
                 });
             }
 
-            if (request.Stream && httpResponse.ResponseStream != null)
+            if (isStreaming && httpResponse.ResponseStream != null)
             {
                 // 透明流式响应
                 _logger.LogDebug("返回透明流式响应");

@@ -175,14 +175,6 @@ public interface ILLMProvider
     string GetModelsEndpoint();
 
     /// <summary>
-    /// 准备HTTP请求内容
-    /// </summary>
-    Task<HttpContent> PrepareRequestContentAsync(
-        ChatCompletionRequest request,
-        ProviderConfig config,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
     /// 从JSON字符串准备HTTP请求内容（用于透明代理模式）
     /// </summary>
     Task<HttpContent> PrepareRequestContentFromJsonAsync(
@@ -218,14 +210,6 @@ public interface ILLMProvider
     /// 获取可用模型列表
     /// </summary>
     Task<ModelsResponse> GetModelsAsync(
-        ProviderConfig config,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// 验证API密钥
-    /// </summary>
-    Task<bool> ValidateApiKeyAsync(
-        string apiKey,
         ProviderConfig config,
         CancellationToken cancellationToken = default);
 

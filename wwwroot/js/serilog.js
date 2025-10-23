@@ -238,6 +238,9 @@ function serilogManagement() {
             // 准备初始数据
             const labels = this.statistics.logsByLevel ? Object.keys(this.statistics.logsByLevel) : [];
             const data = this.statistics.logsByLevel ? Object.values(this.statistics.logsByLevel) : [];
+            
+            // 根据日志级别名称动态生成颜色
+            const colors = labels.map(level => this.getLevelColor(level));
 
             if (pieCtx && !this.levelPieChart) {
                 this.levelPieChart = new Chart(pieCtx, {
@@ -246,13 +249,7 @@ function serilogManagement() {
                             labels: labels,
                             datasets: [{
                                 data: data,
-                                backgroundColor: [
-                                    '#ef4444', // Error - red
-                                    '#f97316', // Warning - orange
-                                    '#3b82f6', // Information - blue
-                                    '#8b5cf6', // Debug - purple
-                                    '#6b7280', // Verbose - gray
-                                ],
+                                backgroundColor: colors,
                                 borderWidth: 2,
                                 borderColor: '#fff'
                             }]
@@ -288,13 +285,7 @@ function serilogManagement() {
                             datasets: [{
                                 label: '日志数量',
                                 data: data,
-                                backgroundColor: [
-                                    '#ef4444',
-                                    '#f97316',
-                                    '#3b82f6',
-                                    '#8b5cf6',
-                                    '#6b7280',
-                                ],
+                                backgroundColor: colors,
                                 borderWidth: 1,
                                 borderColor: '#fff'
                             }]
@@ -328,18 +319,37 @@ function serilogManagement() {
 
             const labels = Object.keys(this.statistics.logsByLevel);
             const data = Object.values(this.statistics.logsByLevel);
+            const colors = labels.map(level => this.getLevelColor(level));
 
             if (this.levelPieChart) {
                 this.levelPieChart.data.labels = labels;
                 this.levelPieChart.data.datasets[0].data = data;
+                this.levelPieChart.data.datasets[0].backgroundColor = colors;
                 this.levelPieChart.update();
             }
 
             if (this.levelBarChart) {
                 this.levelBarChart.data.labels = labels;
                 this.levelBarChart.data.datasets[0].data = data;
+                this.levelBarChart.data.datasets[0].backgroundColor = colors;
                 this.levelBarChart.update();
             }
+        },
+
+        // 获取日志级别颜色（用于图表）
+        getLevelColor(level) {
+            const levelLower = (level || '').toLowerCase();
+            const colors = {
+                'error': '#ef4444',       // 红色
+                'fatal': '#dc2626',       // 深红色
+                'warning': '#f97316',     // 橘黄色
+                'information': '#3b82f6', // 蓝色
+                'info': '#3b82f6',        // 蓝色
+                'debug': '#8b5cf6',       // 紫色
+                'verbose': '#6b7280',     // 灰色
+                'trace': '#9ca3af',       // 浅灰色
+            };
+            return colors[levelLower] || '#6b7280'; // 默认灰色
         },
 
         // 获取日志级别徽章样式

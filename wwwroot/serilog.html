@@ -14,7 +14,7 @@
     <!-- 早期认证检查脚本 - 在页面渲染前执行 -->
     <script>
         // 立即检查认证状态，避免显示未授权内容
-        (function() {
+        (function () {
             const token = localStorage.getItem('authToken');
             if (!token) {
                 // 没有token，立即跳转到登录页
@@ -74,6 +74,10 @@
                 <a href="/dashboard"
                     class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-lg transition duration-200">
                     返回仪表板
+                </a>
+                <a href="/health-report"
+                    class="bg-orange-500 hover:bg-orange-600 text-white px-3 py-2 sm:px-4 rounded-lg transition duration-200 text-center text-sm">
+                    <span>健康检查结果</span>
                 </a>
                 <button @click="toggleAutoRefresh()"
                     :class="autoRefresh ? 'bg-green-500 hover:bg-green-600' : 'bg-gray-500 hover:bg-gray-600'"
@@ -194,8 +198,7 @@
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-2">关键字搜索</label>
-                    <input type="text" x-model="filters.keyword" placeholder="搜索消息或异常..."
-                        @keyup.enter="applyFilters()"
+                    <input type="text" x-model="filters.keyword" placeholder="搜索消息或异常..." @keyup.enter="applyFilters()"
                         class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
                 </div>
                 <div>
@@ -281,7 +284,8 @@
                                         :class="getLevelBadgeClass(log.level)" x-text="log.level || 'Unknown'"></span>
                                 </td>
                                 <td class="px-3 py-4 text-sm text-gray-900">
-                                    <div class="max-w-full truncate" x-text="log.message || '-'" :title="log.message"></div>
+                                    <div class="max-w-full truncate" x-text="log.message || '-'" :title="log.message">
+                                    </div>
                                 </td>
                                 <td class="px-3 py-4 whitespace-nowrap text-sm font-medium">
                                     <button @click="showLogDetail(log)"

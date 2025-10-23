@@ -1867,22 +1867,32 @@ public class KeyManager : IKeyManager
                 ? (configuredModels?.FirstOrDefault() ?? GetDefaultModelForProvider(group.ProviderType))
                 : group.TestModel;
 
-            var testRequest = new ChatCompletionRequest
+            // 使用字典构建测试请求的JSON
+            var testRequestDict = new Dictionary<string, object>
             {
-                Model = testModel,
-                Messages =
-                [
-                    new ChatMessage { Role = "user", Content = "hi" }
-                ],
-                MaxTokens = 1,  // 限制响应长度
-                Temperature = 0  // 确保响应一致性
+                ["model"] = testModel,
+                ["messages"] = new List<Dictionary<string, object>>
+                {
+                    new Dictionary<string, object>
+                    {
+                        ["role"] = "user",
+                        ["content"] = "hi"
+                    }
+                },
+                ["max_tokens"] = 1,  // 限制响应长度
+                ["temperature"] = 0  // 确保响应一致性
             };
+
+            var testRequestJson = JsonConvert.SerializeObject(testRequestDict, new JsonSerializerSettings
+            {
+                NullValueHandling = NullValueHandling.Ignore
+            });
 
             // 使用30秒超时进行验证
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
-            // 调用实际的API使用新的HTTP代理方法
-            var httpContent = await provider.PrepareRequestContentAsync(testRequest, providerConfig, cts.Token);
+            // 调用实际的API使用新的HTTP代理方法（JSON透传）
+            var httpContent = await provider.PrepareRequestContentFromJsonAsync(testRequestJson, providerConfig, cts.Token);
             var httpResponse = await provider.SendHttpRequestAsync(httpContent, apiKey, providerConfig, false, cts.Token);
 
             // 返回验证结果和状态码

@@ -760,8 +760,6 @@ public class AdminController : ControllerBase
     {
         try
         {
-            _logger.LogInformation("获取分组 {GroupId} 的密钥使用统计", groupId);
-
             var result = await _keyManager.GetGroupKeyUsageStatsAsync(groupId);
             return Ok(result);
         }
@@ -780,8 +778,6 @@ public class AdminController : ControllerBase
     {
         try
         {
-            _logger.LogInformation("重置分组 {GroupId} 的密钥使用统计", groupId);
-
             // 获取分组信息
             var groups = await _keyManager.GetAllGroupsAsync();
             var group = groups.FirstOrDefault(g => g.Id == groupId);

@@ -48,23 +48,6 @@ public class GeminiProvider : ILLMProvider
 
     public string GetModelsEndpoint() => ModelsEndpoint;
 
-    public Task<HttpContent> PrepareRequestContentAsync(
-        ChatCompletionRequest request,
-        ProviderConfig config,
-        CancellationToken cancellationToken = default)
-    {
-        // 将OpenAI格式转换为Gemini格式
-        var geminiRequest = ConvertToGeminiRequest(request, config);
-
-        var jsonContent = JsonConvert.SerializeObject(geminiRequest, new JsonSerializerSettings
-        {
-            NullValueHandling = NullValueHandling.Ignore
-        });
-
-        var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
-        return Task.FromResult<HttpContent>(content);
-    }
-
     /// <summary>
     /// 从JSON字符串准备HTTP请求内容（用于透明代理模式）
     /// </summary>
@@ -451,47 +434,6 @@ public class GeminiProvider : ILLMProvider
         throw lastException ?? new Exception("获取 Gemini 原生模型列表失败");
     }
 
-    public async Task<bool> ValidateApiKeyAsync(
-        string apiKey,
-        ProviderConfig config,
-        CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            // 使用字典创建简单的测试请求
-            var testRequestDict = new Dictionary<string, object>
-            {
-                ["contents"] = new List<Dictionary<string, object>>
-                {
-                    new Dictionary<string, object>
-                    {
-                        ["role"] = "user",
-                        ["parts"] = new List<Dictionary<string, object>>
-                        {
-                            new Dictionary<string, object> { ["text"] = "Hi" }
-                        }
-                    }
-                }
-            };
-
-            var jsonContent = JsonConvert.SerializeObject(testRequestDict, new JsonSerializerSettings
-            {
-                NullValueHandling = NullValueHandling.Ignore
-            });
-
-            var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
-            var response = await SendHttpRequestAsync(content, apiKey, config, false, cancellationToken);
-
-            return response.IsSuccess;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "验证 Gemini API 密钥失败, 分组: {GroupId}({GroupName})",
-                config.GroupId ?? "未知", config.GroupName ?? "未知");
-            return false;
-        }
-    }
-
     public int EstimateTokens(string text)
     {
         if (string.IsNullOrEmpty(text))
@@ -519,58 +461,6 @@ public class GeminiProvider : ILLMProvider
             return "***";
 
         return apiKey.Substring(0, 4) + "***" + apiKey.Substring(apiKey.Length - 4);
-    }
-
-    /// <summary>
-    /// 将ChatCompletionRequest转换为Gemini格式（使用字典直接透传）
-    /// </summary>
-    private Dictionary<string, object> ConvertToGeminiRequest(ChatCompletionRequest request, ProviderConfig config)
-    {
-        var contents = new List<Dictionary<string, object>>();
-
-        foreach (var message in request.Messages)
-        {
-            var content = new Dictionary<string, object>
-            {
-                ["role"] = message.Role == "assistant" ? "model" : message.Role,
-                ["parts"] = new List<Dictionary<string, object>>()
-            };
-
-            if (message.Content != null)
-            {
-                var textContent = message.Content.ToString() ?? "";
-                ((List<Dictionary<string, object>>)content["parts"]).Add(new Dictionary<string, object>
-                {
-                    ["text"] = textContent
-                });
-            }
-
-            contents.Add(content);
-        }
-
-        var geminiRequest = new Dictionary<string, object>
-        {
-            ["contents"] = contents
-        };
-
-        // 设置生成配置
-        if (request.Temperature.HasValue || request.TopP.HasValue || request.MaxTokens.HasValue)
-        {
-            var generationConfig = new Dictionary<string, object>();
-            
-            if (request.Temperature.HasValue)
-                generationConfig["temperature"] = request.Temperature.Value;
-            
-            if (request.TopP.HasValue)
-                generationConfig["topP"] = request.TopP.Value;
-            
-            if (request.MaxTokens.HasValue)
-                generationConfig["maxOutputTokens"] = request.MaxTokens.Value;
-
-            geminiRequest["generationConfig"] = generationConfig;
-        }
-
-        return geminiRequest;
     }
 
     /// <summary>

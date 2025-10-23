@@ -1,6 +1,7 @@
 using OrchestrationApi.Models;
 using System.Text;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using OrchestrationApi.Services.Core;
 using System.Net;
 using System.Diagnostics;
@@ -81,162 +82,6 @@ public class OpenAiProvider : ILLMProvider
             "models" => GetModelsEndpoint(),
             _ => GetChatCompletionEndpoint() // 默认使用chat/completions
         };
-    }
-
-    /// <summary>
-    /// 准备HTTP请求内容
-    /// </summary>
-    /// <param name="request">请求</param>
-    /// <param name="config">提供商配置</param>
-    /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>HTTP请求内容</returns>
-    public Task<HttpContent> PrepareRequestContentAsync(
-        ChatCompletionRequest request,
-        ProviderConfig config,
-        CancellationToken cancellationToken = default)
-    {
-        // 应用模型名称解析
-        var resolvedRequest = new ChatCompletionRequest
-        {
-            Model = ResolveModelName(request.Model, config.ModelAliases),
-            Messages = request.Messages,
-            Temperature = request.Temperature,
-            TopP = request.TopP,
-            MaxTokens = request.MaxTokens,
-            Stream = config.FakeStreaming ? false : request.Stream, // 假流模式下强制非流式
-            PresencePenalty = request.PresencePenalty,
-            FrequencyPenalty = request.FrequencyPenalty,
-            Tools = request.Tools,
-            Stop = request.Stop,
-            StreamOptions = request.StreamOptions,
-            LogitBias = request.LogitBias,
-            User = request.User,
-
-            // 新增参数透传
-            N = request.N,
-            FunctionCall = request.FunctionCall,
-            Functions = request.Functions,
-            ToolChoice = request.ToolChoice,
-            ParallelToolCalls = request.ParallelToolCalls,
-            ResponseFormat = request.ResponseFormat,
-            Seed = request.Seed,
-            ServiceTier = request.ServiceTier,
-
-            // GPT-5/GPT-4o 新参数
-            Verbosity = request.Verbosity,
-            MinimalReasoning = request.MinimalReasoning,
-            AllowedTools = request.AllowedTools,
-            ReasoningEffort = request.ReasoningEffort,
-
-            // 扩展参数
-            Metadata = request.Metadata,
-            Store = request.Store,
-
-            // 新补充的重要参数
-            TopLogprobs = request.TopLogprobs,
-            Logprobs = request.Logprobs,
-            MaxCompletionTokens = request.MaxCompletionTokens,
-            Modalities = request.Modalities,
-            Audio = request.Audio,
-            Prediction = request.Prediction,
-            DeveloperMessage = request.DeveloperMessage
-        };
-
-        // 应用参数覆盖
-        foreach (var parameter in config.ParameterOverrides)
-        {
-            switch (parameter.Key.ToLower())
-            {
-                case "temperature":
-                    if (float.TryParse(parameter.Value.ToString(), out var temp))
-                        resolvedRequest.Temperature = temp;
-                    break;
-
-                case "top_p":
-                    if (float.TryParse(parameter.Value.ToString(), out var topP))
-                        resolvedRequest.TopP = topP;
-                    break;
-
-                case "max_tokens":
-                    if (int.TryParse(parameter.Value.ToString(), out var maxTokens))
-                        resolvedRequest.MaxTokens = maxTokens;
-                    break;
-
-                case "presence_penalty":
-                    if (float.TryParse(parameter.Value.ToString(), out var presencePenalty))
-                        resolvedRequest.PresencePenalty = presencePenalty;
-                    break;
-
-                case "frequency_penalty":
-                    if (float.TryParse(parameter.Value.ToString(), out var frequencyPenalty))
-                        resolvedRequest.FrequencyPenalty = frequencyPenalty;
-                    break;
-
-                case "n":
-                    if (int.TryParse(parameter.Value.ToString(), out var n))
-                        resolvedRequest.N = n;
-                    break;
-
-                case "seed":
-                    if (int.TryParse(parameter.Value.ToString(), out var seed))
-                        resolvedRequest.Seed = seed;
-                    break;
-
-                case "verbosity":
-                    resolvedRequest.Verbosity = parameter.Value.ToString();
-                    break;
-
-                case "reasoning_effort":
-                    resolvedRequest.ReasoningEffort = parameter.Value.ToString();
-                    break;
-
-                case "service_tier":
-                    resolvedRequest.ServiceTier = parameter.Value.ToString();
-                    break;
-
-                case "minimal_reasoning":
-                    if (bool.TryParse(parameter.Value.ToString(), out var minimalReasoning))
-                        resolvedRequest.MinimalReasoning = minimalReasoning;
-                    break;
-
-                case "parallel_tool_calls":
-                    if (bool.TryParse(parameter.Value.ToString(), out var parallelToolCalls))
-                        resolvedRequest.ParallelToolCalls = parallelToolCalls;
-                    break;
-
-                case "store":
-                    if (bool.TryParse(parameter.Value.ToString(), out var store))
-                        resolvedRequest.Store = store;
-                    break;
-
-                case "top_logprobs":
-                    if (int.TryParse(parameter.Value.ToString(), out var topLogprobs))
-                        resolvedRequest.TopLogprobs = topLogprobs;
-                    break;
-
-                case "logprobs":
-                    if (bool.TryParse(parameter.Value.ToString(), out var logprobs))
-                        resolvedRequest.Logprobs = logprobs;
-                    break;
-
-                case "max_completion_tokens":
-                    if (int.TryParse(parameter.Value.ToString(), out var maxCompletionTokens))
-                        resolvedRequest.MaxCompletionTokens = maxCompletionTokens;
-                    break;
-
-                case "developer_message":
-                    resolvedRequest.DeveloperMessage = parameter.Value.ToString();
-                    break;
-            }
-        }
-
-        var json = JsonConvert.SerializeObject(resolvedRequest,
-            new JsonSerializerSettings
-            {
-                NullValueHandling = NullValueHandling.Ignore
-            });
-
-        return Task.FromResult<HttpContent>(new StringContent(json, Encoding.UTF8, "application/json"));
     }
 
     /// <summary>
@@ -579,35 +424,6 @@ public class OpenAiProvider : ILLMProvider
         throw lastException ?? new Exception("获取 OpenAI 模型列表失败");
     }
 
-    public async Task<bool> ValidateApiKeyAsync(
-        string apiKey,
-        ProviderConfig config,
-        CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            var testRequest = new ChatCompletionRequest
-            {
-                Model = "gpt-3.5-turbo",
-                Messages = new List<ChatMessage>
-                {
-                    new ChatMessage { Role = "user", Content = "test" }
-                },
-                MaxTokens = 1
-            };
-
-            var content = await PrepareRequestContentAsync(testRequest, config, cancellationToken);
-            var response = await SendHttpRequestAsync(content, apiKey, config, false, cancellationToken);
-
-            return response.IsSuccess;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "验证 OpenAI API 密钥失败");
-            return false;
-        }
-    }
-
     public int EstimateTokens(string text)
     {
         if (string.IsNullOrEmpty(text))
@@ -670,8 +486,8 @@ public class OpenAiProvider : ILLMProvider
     {
         try
         {
-            // 解析非流式响应
-            var response = JsonConvert.DeserializeObject<ChatCompletionResponse>(nonStreamingContent);
+            // 使用 JObject 动态解析非流式响应
+            var response = JObject.Parse(nonStreamingContent);
             if (response == null)
             {
                 _logger.LogWarning("OpenAI 假流转换失败：无法解析响应内容");
@@ -680,13 +496,29 @@ public class OpenAiProvider : ILLMProvider
 
             var streamChunks = new List<string>();
 
-            // 遍历每个choice，将其转换为流式chunk
-            for (int choiceIndex = 0; choiceIndex < response.Choices.Count; choiceIndex++)
-            {
-                var choice = response.Choices[choiceIndex];
+            // 从响应中读取基本字段
+            var responseId = response["id"]?.ToString() ?? "";
+            var responseCreated = response["created"]?.Value<long>() ?? 0;
+            var responseModel = response["model"]?.ToString() ?? "";
+            var choices = response["choices"] as JArray;
 
+            if (choices == null || choices.Count == 0)
+            {
+                _logger.LogWarning("OpenAI 假流转换失败：响应中没有 choices");
+                return new MemoryStream(Encoding.UTF8.GetBytes("data: [DONE]\n\n"));
+            }
+
+            // 遍历每个choice，将其转换为流式chunk
+            for (int choiceIndex = 0; choiceIndex < choices.Count; choiceIndex++)
+            {
+                var choice = choices[choiceIndex] as JObject;
+                if (choice == null) continue;
+
+                var message = choice["message"] as JObject;
+                
                 // 如果有内容，分段发送
-                var contentStr = choice.Message?.Content?.ToString();
+                var content = message?["content"];
+                var contentStr = content?.ToString();
                 if (!string.IsNullOrEmpty(contentStr))
                 {
                     const int chunkSize = 50; // 每个chunk的字符数
@@ -697,10 +529,10 @@ public class OpenAiProvider : ILLMProvider
 
                         var streamChunk = new
                         {
-                            id = response.Id,
+                            id = responseId,
                             @object = "chat.completion.chunk",
-                            created = response.Created,
-                            model = response.Model,
+                            created = responseCreated,
+                            model = responseModel,
                             choices = new[]
                             {
                                 new
@@ -717,16 +549,20 @@ public class OpenAiProvider : ILLMProvider
                 }
 
                 // 发送工具调用chunk（如果有）
-                if (choice.Message?.ToolCalls != null && choice.Message.ToolCalls.Count > 0)
+                var toolCalls = message?["tool_calls"] as JArray;
+                if (toolCalls != null && toolCalls.Count > 0)
                 {
-                    foreach (var toolCall in choice.Message.ToolCalls)
+                    foreach (var toolCall in toolCalls)
                     {
+                        var toolCallObj = toolCall as JObject;
+                        if (toolCallObj == null) continue;
+
                         var toolCallChunk = new
                         {
-                            id = response.Id,
+                            id = responseId,
                             @object = "chat.completion.chunk",
-                            created = response.Created,
-                            model = response.Model,
+                            created = responseCreated,
+                            model = responseModel,
                             choices = new[]
                             {
                                 new
@@ -738,12 +574,12 @@ public class OpenAiProvider : ILLMProvider
                                             new
                                             {
                                                 index = 0,
-                                                id = toolCall.Id,
-                                                type = toolCall.Type,
+                                                id = toolCallObj["id"]?.ToString(),
+                                                type = toolCallObj["type"]?.ToString(),
                                                 function = new
                                                 {
-                                                    name = toolCall.Function?.Name,
-                                                    arguments = toolCall.Function?.Arguments
+                                                    name = toolCallObj["function"]?["name"]?.ToString(),
+                                                    arguments = toolCallObj["function"]?["arguments"]?.ToString()
                                                 }
                                             }
                                         }
@@ -758,19 +594,20 @@ public class OpenAiProvider : ILLMProvider
                 }
 
                 // 发送结束chunk
+                var finishReason = choice["finish_reason"]?.ToString() ?? "stop";
                 var finishChunk = new
                 {
-                    id = response.Id,
+                    id = responseId,
                     @object = "chat.completion.chunk",
-                    created = response.Created,
-                    model = response.Model,
+                    created = responseCreated,
+                    model = responseModel,
                     choices = new[]
                     {
                         new
                         {
                             index = choiceIndex,
                             delta = new { },
-                            finish_reason = choice.FinishReason ?? "stop"
+                            finish_reason = finishReason
                         }
                     }
                 };

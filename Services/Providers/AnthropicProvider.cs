@@ -46,16 +46,6 @@ public class AnthropicProvider : ILLMProvider
         return "/v1/models";
     }
 
-    public Task<HttpContent> PrepareRequestContentAsync(
-        ChatCompletionRequest request,
-        ProviderConfig config,
-        CancellationToken cancellationToken = default)
-    {
-        // 为了保持接口兼容性，这个方法抛出不支持异常
-        // AnthropicProvider现在只支持原生格式
-        throw new NotSupportedException("AnthropicProvider 不再支持 ChatCompletionRequest 格式，请使用 AnthropicMessageRequest 格式调用 PrepareAnthropicRequestContentAsync 方法");
-    }
-
     /// <summary>
     /// 从JSON字符串准备HTTP请求内容（用于透明代理模式）
     /// </summary>
@@ -68,26 +58,6 @@ public class AnthropicProvider : ILLMProvider
         // 这里简化处理：直接透传，由Provider的转换逻辑处理
         // TODO: 如果需要完整支持，应该在这里进行格式转换
         return Task.FromResult<HttpContent>(new StringContent(requestJson, Encoding.UTF8, "application/json"));
-    }
-
-    public Task<HttpContent> PrepareAnthropicRequestContentAsync(
-        AnthropicMessageRequest request,
-        ProviderConfig config,
-        CancellationToken cancellationToken = default)
-    {
-        // 直接使用Anthropic原生格式
-        // 应用参数覆盖
-        ApplyParameterOverrides(request, config.ParameterOverrides);
-        
-        var json = JsonConvert.SerializeObject(request, Formatting.None, new JsonSerializerSettings
-        {
-            NullValueHandling = NullValueHandling.Ignore
-        });
-        
-        _logger.LogDebug("Anthropic原生API请求内容: {RequestContent}, 分组: {GroupId}({GroupName})", 
-            json, config.GroupId ?? "未知", config.GroupName ?? "未知");
-        
-        return Task.FromResult<HttpContent>(new StringContent(json, Encoding.UTF8, "application/json"));
     }
 
     /// <summary>
@@ -300,44 +270,6 @@ public class AnthropicProvider : ILLMProvider
         return Task.FromResult(GetSupportedModels());
     }
 
-    public async Task<bool> ValidateApiKeyAsync(
-        string apiKey,
-        ProviderConfig config,
-        CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            // 创建一个简单的测试请求
-            var testRequest = new AnthropicMessageRequest
-            {
-                Model = "claude-3-haiku-20240307",
-                Messages = new List<AnthropicMessage>
-                {
-                    new() 
-                    { 
-                        Role = "user", 
-                        Content = new List<AnthropicContent>
-                        {
-                            new() { Type = "text", Text = "Hello" }
-                        }
-                    }
-                },
-                MaxTokens = 1
-            };
-
-            var content = await PrepareAnthropicRequestContentAsync(testRequest, config, cancellationToken);
-            var response = await SendHttpRequestAsync(content, apiKey, config, false, cancellationToken);
-
-            return response.IsSuccess;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "验证Anthropic API密钥失败: {ApiKey}, 分组: {GroupId}({GroupName})", 
-                apiKey.Substring(0, Math.Min(8, apiKey.Length)) + "...", config.GroupId ?? "未知", config.GroupName ?? "未知");
-            return false;
-        }
-    }
-
     public int EstimateTokens(string text)
     {
         if (string.IsNullOrEmpty(text))
@@ -372,34 +304,7 @@ public class AnthropicProvider : ILLMProvider
     }
 
 
-    /// <summary>
-    /// 应用参数覆盖
-    /// </summary>
-    private void ApplyParameterOverrides(AnthropicMessageRequest request, Dictionary<string, object> overrides)
-    {
-        foreach (var kvp in overrides)
-        {
-            switch (kvp.Key.ToLower())
-            {
-                case "max_tokens":
-                    if (kvp.Value is int maxTokens)
-                        request.MaxTokens = maxTokens;
-                    break;
-                case "temperature":
-                    if (kvp.Value is float temperature)
-                        request.Temperature = temperature;
-                    break;
-                case "top_p":
-                    if (kvp.Value is float topP)
-                        request.TopP = topP;
-                    break;
-                case "top_k":
-                    if (kvp.Value is int topK)
-                        request.TopK = topK;
-                    break;
-            }
-        }
-    }
+
 
     private static ModelsResponse GetSupportedModels()
     {
