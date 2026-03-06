@@ -1088,11 +1088,14 @@ public class AdminController : ControllerBase
     /// <summary>
     /// 检测单个模型的可用性
     /// </summary>
-    [HttpPost("health/models/{groupId}/{modelId}")]
+    [HttpPost("health/models/{groupId}/{*modelId}")]
     public async Task<IActionResult> CheckSingleModelHealth(string groupId, string modelId)
     {
         try
         {
+            // Decode URL-encoded model id (e.g., %2F -> /)
+            modelId = Uri.UnescapeDataString(modelId);
+
             // 获取该分组的第一个可用API密钥
             var apiKeys = await _keyManager.GetGroupApiKeysAsync(groupId);
             if (apiKeys.Count == 0)
