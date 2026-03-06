@@ -2,41 +2,181 @@
     display: none !important;
 }
 
+/* 全局现代化主题（仅作用于后台管理页） */
+.modern-ui {
+    --surface: rgba(255, 255, 255, 0.82);
+    --surface-strong: #ffffff;
+    --surface-border: rgba(148, 163, 184, 0.2);
+    --text-muted: #64748b;
+    --bg-gradient: radial-gradient(circle at 0% 0%, #dbeafe 0, transparent 35%),
+        radial-gradient(circle at 100% 20%, #ede9fe 0, transparent 32%),
+        linear-gradient(140deg, #f8fafc 0%, #eef2ff 46%, #f8fafc 100%);
+    color: #0f172a;
+    background: var(--bg-gradient);
+}
+
+.modern-ui .container {
+    max-width: 1480px;
+}
+
+.modern-ui .bg-white {
+    background: var(--surface);
+    border: 1px solid var(--surface-border);
+    box-shadow: 0 12px 28px -20px rgba(15, 23, 42, 0.45);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+}
+
+.modern-ui .rounded-lg,
+.modern-ui .rounded-xl {
+    border-radius: 14px;
+}
+
+.modern-ui h1,
+.modern-ui h2,
+.modern-ui h3 {
+    letter-spacing: 0.01em;
+}
+
+.modern-ui .text-gray-500,
+.modern-ui .text-gray-600 {
+    color: var(--text-muted);
+}
+
+.modern-ui table {
+    border-collapse: separate;
+    border-spacing: 0;
+}
+
+.modern-ui thead tr {
+    background: #f8fafc;
+}
+
+.modern-ui tbody tr {
+    transition: transform 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+.modern-ui tbody tr:hover {
+    background-color: #f8fbff;
+    box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.12);
+}
+
+.modern-ui input,
+.modern-ui select,
+.modern-ui textarea {
+    border-color: #d1d5db !important;
+    border-radius: 10px !important;
+    background: rgba(255, 255, 255, 0.9);
+}
+
+.modern-ui input:focus,
+.modern-ui select:focus,
+.modern-ui textarea:focus {
+    outline: none;
+    border-color: #60a5fa !important;
+    box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.2);
+}
+
+/* 统一按钮动效，保持原有颜色体系 */
+.modern-ui button,
+.modern-ui a[class*="bg-"] {
+    border-radius: 10px !important;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease !important;
+}
+
+.modern-ui button:hover,
+.modern-ui a[class*="bg-"]:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 20px -14px rgba(15, 23, 42, 0.45);
+    filter: saturate(1.05);
+}
+
+.modern-ui button:active,
+.modern-ui a[class*="bg-"]:active {
+    transform: translateY(0);
+}
+
+/* 模态框统一质感 */
+.modern-ui .fixed.inset-0 .bg-white {
+    background: var(--surface-strong);
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    box-shadow: 0 24px 48px -30px rgba(15, 23, 42, 0.45);
+}
+
 /* 自定义极小屏幕断点支持 */
 @media (min-width: 480px) {
     .xs\:flex-row {
         flex-direction: row;
     }
 
-    .xs\:space-y-0> :not([hidden])~ :not([hidden]) {
+    .xs\:space-y-0 > :not([hidden]) ~ :not([hidden]) {
         --tw-space-y-reverse: 0;
         margin-top: calc(0px * calc(1 - var(--tw-space-y-reverse)));
         margin-bottom: calc(0px * var(--tw-space-y-reverse));
     }
 
-    .xs\:space-x-2> :not([hidden])~ :not([hidden]) {
+    .xs\:space-x-2 > :not([hidden]) ~ :not([hidden]) {
         --tw-space-x-reverse: 0;
         margin-right: calc(0.5rem * var(--tw-space-x-reverse));
         margin-left: calc(0.5rem * calc(1 - var(--tw-space-x-reverse)));
     }
 }
 
+/* 大屏优化（2K及以上） */
+@media (min-width: 1536px) {
+    .modern-ui .container {
+        max-width: 1620px;
+    }
+}
+
+/* 平板与笔记本 */
+@media (max-width: 1024px) {
+    .modern-ui .container {
+        max-width: 100%;
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
+}
+
 /* 移动端触摸友好的按钮最小高度 */
-@media (max-width: 640px) {
+@media (max-width: 768px) {
+    .modern-ui button,
+    .modern-ui a[class*="bg-"],
     .touch-friendly {
-        min-height: 44px;
+        min-height: 42px;
+    }
+
+    .modern-ui .grid.grid-cols-3 {
+        grid-template-columns: repeat(1, minmax(0, 1fr));
+        gap: 1rem;
+    }
+}
+
+/* 小屏手机 */
+@media (max-width: 480px) {
+    .modern-ui .container {
+        padding-left: 0.75rem;
+        padding-right: 0.75rem;
+    }
+
+    .modern-ui .bg-white {
+        border-radius: 12px;
+    }
+
+    .modern-ui table {
+        font-size: 12px;
     }
 }
 
 /* 自定义模态框动画 */
 .modal-animation {
-    animation: modalSlideIn 0.3s ease-out;
+    animation: modalSlideIn 0.28s ease-out;
 }
 
 @keyframes modalSlideIn {
     from {
         opacity: 0;
-        transform: translateY(-20px) scale(0.95);
+        transform: translateY(-20px) scale(0.96);
     }
     to {
         opacity: 1;
@@ -45,7 +185,7 @@
 }
 
 .modal-backdrop {
-    animation: backdropFadeIn 0.3s ease-out;
+    animation: backdropFadeIn 0.24s ease-out;
 }
 
 @keyframes backdropFadeIn {

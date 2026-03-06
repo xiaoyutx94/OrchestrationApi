@@ -1,2 +1,103 @@
-/* login.html页面的CSS样式 */
-/* 由于该页面主要使用Tailwind CSS，没有自定义CSS样式，此文件保留以备将来扩展 */
+/* 登录页现代化样式（与 Tailwind 组合使用） */
+.modern-login {
+    position: relative;
+    overflow: hidden;
+    background:
+        radial-gradient(circle at 10% 10%, rgba(59, 130, 246, 0.2), transparent 35%),
+        radial-gradient(circle at 90% 20%, rgba(139, 92, 246, 0.18), transparent 32%),
+        linear-gradient(135deg, #eef2ff 0%, #dbeafe 45%, #ede9fe 100%);
+}
+
+.modern-login::before {
+    content: "";
+    position: absolute;
+    inset: -30% auto auto -20%;
+    width: 520px;
+    height: 520px;
+    background: radial-gradient(circle, rgba(59, 130, 246, 0.16), transparent 68%);
+    pointer-events: none;
+}
+
+.modern-login::after {
+    content: "";
+    position: absolute;
+    inset: auto -15% -35% auto;
+    width: 520px;
+    height: 520px;
+    background: radial-gradient(circle, rgba(99, 102, 241, 0.16), transparent 68%);
+    pointer-events: none;
+}
+
+.modern-login > div {
+    position: relative;
+    z-index: 1;
+}
+
+.modern-login .bg-white {
+    background: rgba(255, 255, 255, 0.88) !important;
+    border: 1px solid rgba(148, 163, 184, 0.22) !important;
+    box-shadow: 0 24px 54px -34px rgba(15, 23, 42, 0.45) !important;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+}
+
+.modern-login input {
+    border-radius: 12px !important;
+    border-color: #cbd5e1 !important;
+    background: rgba(255, 255, 255, 0.96);
+}
+
+.modern-login input:focus {
+    border-color: #60a5fa !important;
+    box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.2) !important;
+}
+
+.modern-login button[type="submit"] {
+    border-radius: 12px !important;
+    min-height: 46px;
+    box-shadow: 0 12px 20px -16px rgba(30, 64, 175, 0.85);
+    transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease !important;
+}
+
+.modern-login button[type="submit"]:hover {
+    transform: translateY(-1px);
+    filter: saturate(1.06);
+    box-shadow: 0 16px 24px -18px rgba(30, 64, 175, 0.85);
+}
+
+.modern-login #togglePassword {
+    border-radius: 8px;
+    padding: 0.35rem;
+}
+
+@media (max-width: 768px) {
+    .modern-login .max-w-md {
+        max-width: 30rem;
+    }
+
+    .modern-login .bg-white {
+        padding: 1.5rem !important;
+    }
+}
+
+@media (max-width: 480px) {
+    .modern-login .mx-4 {
+        margin-left: 0.75rem !important;
+        margin-right: 0.75rem !important;
+    }
+
+    .modern-login .bg-white {
+        border-radius: 16px !important;
+        padding: 1.25rem !important;
+    }
+
+    .modern-login h1 {
+        font-size: 1.6rem !important;
+        line-height: 1.2;
+    }
+
+    .modern-login p,
+    .modern-login label {
+        font-size: 0.9rem;
+    }
+}

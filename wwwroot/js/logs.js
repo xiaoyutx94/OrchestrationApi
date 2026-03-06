@@ -2,6 +2,11 @@
 function showConfirm(message, title = '确认操作') {
     return new Promise((resolve) => {
         const modal = document.getElementById('confirmModal');
+        if (!modal) {
+            // Fallback for pages that do not render custom confirm modal.
+            resolve(window.confirm(`${title}\n\n${message}`));
+            return;
+        }
         const messageEl = document.getElementById('confirmMessage');
         const titleEl = modal.querySelector('h3');
         const yesBtn = document.getElementById('confirmYes');
@@ -58,6 +63,12 @@ function showConfirm(message, title = '确认操作') {
 function showAlert(message, type = 'info', title = '提示') {
     return new Promise((resolve) => {
         const modal = document.getElementById('alertModal');
+        if (!modal) {
+            // Fallback for pages that do not render custom alert modal.
+            window.alert(`${title}\n\n${message}`);
+            resolve();
+            return;
+        }
         const messageEl = document.getElementById('alertMessage');
         const titleEl = document.getElementById('alertTitle');
         const iconEl = document.getElementById('alertIcon');

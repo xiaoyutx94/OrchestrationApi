@@ -9,67 +9,87 @@
     <link rel="icon" href="/favicon.png?v=2" type="image/png">
     <link rel="shortcut icon" href="/favicon.ico?v=2" type="image/x-icon">
     <link rel="apple-touch-icon" href="/favicon.png?v=2" />
+
+    <!-- Google Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="js/theme-config.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="css/login.css">
 </head>
-<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen flex items-center justify-center">
+<body class="bg-gradient-to-br from-gray-50 to-gray-200 min-h-screen flex items-center justify-center font-sans">
     <div class="max-w-md w-full mx-4">
         <!-- Logo 区域 -->
         <div class="text-center mb-8">
-            <div class="mx-auto h-16 w-16 bg-gradient-to-r from-blue-500 to-indigo-600 rounded-full flex items-center justify-center mb-4">
-                <i class="fas fa-network-wired text-white text-2xl"></i>
+            <div class="mx-auto h-20 w-20 bg-gradient-to-tr from-primary-500 to-primary-600 rounded-2xl shadow-lg shadow-primary-500/20 flex items-center justify-center mb-6 transform rotate-3 hover:rotate-0 transition-transform duration-300">
+                <i class="fas fa-network-wired text-white text-3xl"></i>
             </div>
-            <h1 class="text-3xl font-bold text-gray-900">OrchestrationApi</h1>
-            <p class="text-gray-600 mt-2">多服务商AI API代理服务</p>
+            <h1 class="text-3xl font-bold text-gray-900 tracking-tight">OrchestrationApi</h1>
+            <p class="text-gray-500 mt-2 font-medium">多服务商AI API代理服务</p>
         </div>
 
         <!-- 登录表单 -->
-        <div class="bg-white rounded-2xl shadow-xl p-8 border border-gray-100">
-            <form id="loginForm">
+        <div class="bg-white/80 backdrop-blur-xl rounded-3xl shadow-2xl shadow-gray-200/50 p-8 border border-white/50 relative overflow-hidden">
+            <!-- decorative background blob -->
+            <div class="absolute -top-10 -right-10 w-32 h-32 bg-primary-100 rounded-full blur-3xl opacity-50 pointer-events-none"></div>
+            
+            <form id="loginForm" class="relative z-10">
                 <div class="mb-6">
-                    <label for="username" class="block text-sm font-semibold text-gray-700 mb-2">
-                        <i class="fas fa-user mr-2"></i>用户名
+                    <label for="username" class="block text-sm font-semibold text-gray-700 mb-2 ml-1">
+                        用户名
                     </label>
-                    <input type="text" id="username" name="username" required
-                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-200"
-                        placeholder="请输入用户名">
+                    <div class="relative group">
+                        <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                            <i class="fas fa-user text-gray-400 group-focus-within:text-primary-500 transition-colors"></i>
+                        </div>
+                        <input type="text" id="username" name="username" required
+                            class="w-full pl-11 pr-4 py-3.5 bg-gray-50/50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition-all duration-200 outline-none text-gray-800 placeholder-gray-400"
+                            placeholder="请输入用户名">
+                    </div>
                 </div>
 
-                <div class="mb-6">
-                    <label for="password" class="block text-sm font-semibold text-gray-700 mb-2">
-                        <i class="fas fa-lock mr-2"></i>密码
+                <div class="mb-8">
+                    <label for="password" class="block text-sm font-semibold text-gray-700 mb-2 ml-1">
+                        密码
                     </label>
-                    <div class="relative">
+                    <div class="relative group">
+                        <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                            <i class="fas fa-lock text-gray-400 group-focus-within:text-primary-500 transition-colors"></i>
+                        </div>
                         <input type="password" id="password" name="password" required
-                            class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-200"
+                            class="w-full pl-11 pr-12 py-3.5 bg-gray-50/50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition-all duration-200 outline-none text-gray-800 placeholder-gray-400"
                             placeholder="请输入密码">
                         <button type="button" id="togglePassword" 
-                            class="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700">
+                            class="absolute right-0 top-0 h-full px-4 text-gray-400 hover:text-gray-600 transition-colors focus:outline-none">
                             <i class="fas fa-eye"></i>
                         </button>
                     </div>
                 </div>
 
                 <!-- 错误提示 -->
-                <div id="errorMessage" class="hidden mb-4 p-3 bg-red-100 border border-red-300 text-red-700 rounded-lg">
-                    <i class="fas fa-exclamation-triangle mr-2"></i>
+                <div id="errorMessage" class="hidden mb-6 p-4 bg-red-50 border border-red-100 text-red-600 rounded-xl text-sm flex items-start">
+                    <i class="fas fa-exclamation-circle mt-0.5 mr-2 flex-shrink-0"></i>
                     <span id="errorText"></span>
                 </div>
 
                 <!-- 登录按钮 -->
                 <button type="submit" id="loginButton"
-                    class="w-full bg-gradient-to-r from-blue-500 to-indigo-600 text-white py-3 px-4 rounded-lg font-semibold hover:from-blue-600 hover:to-indigo-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed">
-                    <span id="loginButtonText">
-                        <i class="fas fa-sign-in-alt mr-2"></i>登录
+                    class="w-full bg-primary-600 text-white py-3.5 px-4 rounded-xl font-semibold shadow-lg shadow-primary-500/30 hover:bg-primary-700 hover:shadow-primary-600/40 hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200 disabled:opacity-70 disabled:cursor-not-allowed disabled:transform-none">
+                    <span id="loginButtonText" class="flex items-center justify-center">
+                        登录 <i class="fas fa-arrow-right ml-2 text-sm opacity-80"></i>
                     </span>
-                    <span id="loginButtonLoading" class="hidden">
-                        <i class="fas fa-spinner fa-spin mr-2"></i>登录中...
+                    <span id="loginButtonLoading" class="hidden flex items-center justify-center">
+                        <svg class="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        登录中...
                     </span>
                 </button>
             </form>
-
         </div>
 
         <!-- 页脚信息 -->

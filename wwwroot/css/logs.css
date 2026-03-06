@@ -1,4 +1,77 @@
-/* 自定义样式 */
+/* 日志页统一现代化主题 */
+.modern-ui {
+    --surface: rgba(255, 255, 255, 0.84);
+    --surface-border: rgba(148, 163, 184, 0.2);
+    --bg-gradient: radial-gradient(circle at 8% 0%, #dbeafe 0, transparent 34%),
+        radial-gradient(circle at 90% 16%, #fee2e2 0, transparent 30%),
+        linear-gradient(145deg, #f8fafc 0%, #eff6ff 46%, #f8fafc 100%);
+    background: var(--bg-gradient);
+    color: #0f172a;
+}
+
+.modern-ui .container {
+    max-width: 1500px;
+}
+
+.modern-ui .bg-white {
+    background: var(--surface);
+    border: 1px solid var(--surface-border);
+    border-radius: 14px;
+    box-shadow: 0 12px 28px -20px rgba(15, 23, 42, 0.45);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+}
+
+.modern-ui .text-gray-500,
+.modern-ui .text-gray-600 {
+    color: #64748b;
+}
+
+.modern-ui button,
+.modern-ui a[class*="bg-"] {
+    border-radius: 10px !important;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease !important;
+}
+
+.modern-ui button:hover,
+.modern-ui a[class*="bg-"]:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 20px -14px rgba(15, 23, 42, 0.42);
+    filter: saturate(1.06);
+}
+
+.modern-ui input,
+.modern-ui select {
+    border-color: #d1d5db !important;
+    border-radius: 10px !important;
+    background: rgba(255, 255, 255, 0.92);
+}
+
+.modern-ui input:focus,
+.modern-ui select:focus {
+    outline: none;
+    border-color: #60a5fa !important;
+    box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.2);
+}
+
+.modern-ui table {
+    border-collapse: separate;
+    border-spacing: 0;
+}
+
+.modern-ui thead tr {
+    background: #f8fafc;
+}
+
+.modern-ui tbody tr {
+    transition: background-color 0.2s ease;
+}
+
+.modern-ui tbody tr:hover {
+    background-color: #f8fbff;
+}
+
+/* 图表区域 */
 .chart-container {
     position: relative;
     height: 300px;
@@ -23,9 +96,9 @@
 }
 
 .chart-toolbar button {
-    background: rgba(255, 255, 255, 0.9);
+    background: rgba(255, 255, 255, 0.92);
     border: 1px solid #e5e7eb;
-    border-radius: 6px;
+    border-radius: 8px;
     padding: 6px 8px;
     font-size: 12px;
     cursor: pointer;
@@ -34,7 +107,7 @@
 
 .chart-toolbar button:hover {
     background: rgba(255, 255, 255, 1);
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 4px 10px rgba(15, 23, 42, 0.1);
 }
 
 .chart-fullscreen {
@@ -52,25 +125,6 @@
     height: calc(100vh - 80px);
 }
 
-/* 响应式设计 */
-@media (max-width: 768px) {
-    .chart-container {
-        height: 250px;
-    }
-
-    .chart-toolbar {
-        position: static;
-        justify-content: center;
-        margin-bottom: 10px;
-    }
-}
-
-@media (max-width: 640px) {
-    .chart-container {
-        height: 200px;
-    }
-}
-
 /* 无障碍访问性 */
 .sr-only {
     position: absolute;
@@ -86,15 +140,14 @@
 
 /* 动画效果 */
 .fade-in {
-    animation: fadeIn 0.5s ease-in;
+    animation: fadeIn 0.45s ease-in;
 }
 
 @keyframes fadeIn {
     from {
         opacity: 0;
-        transform: translateY(20px);
+        transform: translateY(14px);
     }
-
     to {
         opacity: 1;
         transform: translateY(0);
@@ -115,8 +168,48 @@
     0% {
         transform: rotate(0deg);
     }
-
     100% {
         transform: rotate(360deg);
+    }
+}
+
+/* 响应式设计 */
+@media (max-width: 1024px) {
+    .modern-ui .container {
+        max-width: 100%;
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
+}
+
+@media (max-width: 768px) {
+    .chart-container {
+        height: 250px;
+    }
+
+    .chart-toolbar {
+        position: static;
+        justify-content: center;
+        margin-bottom: 10px;
+    }
+
+    .modern-ui button,
+    .modern-ui a[class*="bg-"] {
+        min-height: 42px;
+    }
+}
+
+@media (max-width: 640px) {
+    .chart-container {
+        height: 210px;
+    }
+
+    .modern-ui .container {
+        padding-left: 0.75rem;
+        padding-right: 0.75rem;
+    }
+
+    .modern-ui table {
+        font-size: 12px;
     }
 }

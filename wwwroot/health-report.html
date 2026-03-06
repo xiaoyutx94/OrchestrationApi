@@ -60,43 +60,54 @@
         })();
     </script>
 
+    <!-- Google Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="js/theme-config.js"></script>
     <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
     <link rel="stylesheet" href="css/dashboard.css">
     <link rel="stylesheet" href="css/modal-components.css">
 </head>
 
-<body class="bg-gray-100 min-h-screen">
+<body class="font-sans bg-gray-50 min-h-screen text-gray-800">
     <div class="container mx-auto px-2 sm:px-4 py-4 sm:py-8" x-data="healthReportDashboard()">
         <!-- Header -->
-        <div class="flex flex-col lg:flex-row lg:justify-between lg:items-center mb-8 space-y-4 lg:space-y-0">
+        <div class="flex flex-col lg:flex-row lg:justify-between lg:items-center mb-8 space-y-4 lg:space-y-0 bg-white/80 backdrop-blur-md p-6 rounded-2xl shadow-soft border border-white/50 sticky top-4 z-40 transition-all duration-300 hover:shadow-lg">
             <div>
-                <h1 class="text-2xl md:text-3xl font-bold text-gray-800">
-                    健康检查报表
-                </h1>
-                <p class="text-gray-600 text-sm md:text-base">监控服务商、API密钥和模型的健康状态</p>
+                <div class="flex items-center gap-3 mb-1">
+                    <div class="w-10 h-10 bg-gradient-to-tr from-primary-500 to-primary-600 rounded-xl shadow-lg shadow-primary-500/20 flex items-center justify-center text-white">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    </div>
+                    <h1 class="text-2xl md:text-3xl font-bold text-gray-900 tracking-tight">
+                        健康检查报表
+                    </h1>
+                </div>
+                <p class="text-gray-500 text-sm md:text-base ml-1">监控服务商、API密钥和模型的健康状态</p>
             </div>
 
             <div class="flex flex-col space-y-3 lg:space-y-0 lg:flex-row lg:space-x-4">
                 <!-- 返回仪表板按钮 -->
                 <a href="/dashboard"
-                    class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-center transition-colors">
+                    class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-xl text-center transition-colors">
                     返回仪表板
                 </a>
                 <a href="/serilog"
-                    class="bg-purple-500 hover:bg-purple-600 text-white px-3 py-2 sm:px-4 rounded-lg transition duration-200 text-center text-sm">
+                    class="bg-purple-500 hover:bg-purple-600 text-white px-3 py-2 sm:px-4 rounded-xl transition duration-200 text-center text-sm">
                     <span>系统日志</span>
                 </a>
                 <!-- 手动触发健康检查按钮 -->
                 <button @click="triggerHealthCheck()" :disabled="triggeringCheck"
-                    class="bg-blue-500 hover:bg-blue-600 disabled:bg-blue-300 text-white px-4 py-2 rounded-lg transition-colors">
+                    class="bg-blue-500 hover:bg-blue-600 disabled:bg-blue-300 text-white px-4 py-2 rounded-xl transition-colors">
                     <span x-show="!triggeringCheck">手动检查</span>
                     <span x-show="triggeringCheck">检查中...</span>
                 </button>
 
                 <!-- 刷新按钮 -->
                 <button @click="refreshAllData()" :disabled="loading"
-                    class="bg-green-500 hover:bg-green-600 disabled:bg-green-300 text-white px-4 py-2 rounded-lg transition-colors">
+                    class="bg-green-500 hover:bg-green-600 disabled:bg-green-300 text-white px-4 py-2 rounded-xl transition-colors">
                     <span x-show="!loading">刷新数据</span>
                     <span x-show="loading">加载中...</span>
                 </button>
@@ -105,9 +116,9 @@
 
         <!-- 概览统计 -->
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-            <div class="bg-white rounded-lg shadow p-6">
+            <div class="bg-white/80 backdrop-blur-md rounded-2xl shadow-soft border border-white/50 p-6">
                 <div class="flex items-center">
-                    <div class="p-2 bg-blue-100 rounded-lg">
+                    <div class="p-2 bg-blue-100 rounded-xl">
                         <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                 d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
@@ -120,9 +131,9 @@
                 </div>
             </div>
 
-            <div class="bg-white rounded-lg shadow p-6">
+            <div class="bg-white/80 backdrop-blur-md rounded-2xl shadow-soft border border-white/50 p-6">
                 <div class="flex items-center">
-                    <div class="p-2 bg-green-100 rounded-lg">
+                    <div class="p-2 bg-green-100 rounded-xl">
                         <svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                 d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-3a1 1 0 011-1h2.586l6.414-6.414a6 6 0 015.743-7.743z">
@@ -136,9 +147,9 @@
                 </div>
             </div>
 
-            <div class="bg-white rounded-lg shadow p-6">
+            <div class="bg-white/80 backdrop-blur-md rounded-2xl shadow-soft border border-white/50 p-6">
                 <div class="flex items-center">
-                    <div class="p-2 bg-purple-100 rounded-lg">
+                    <div class="p-2 bg-purple-100 rounded-xl">
                         <svg class="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                 d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10">
@@ -152,9 +163,9 @@
                 </div>
             </div>
 
-            <div class="bg-white rounded-lg shadow p-6">
+            <div class="bg-white/80 backdrop-blur-md rounded-2xl shadow-soft border border-white/50 p-6">
                 <div class="flex items-center">
-                    <div class="p-2 bg-yellow-100 rounded-lg">
+                    <div class="p-2 bg-yellow-100 rounded-xl">
                         <svg class="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                 d="M13 10V3L4 14h7v7l9-11h-7z"></path>
@@ -170,7 +181,7 @@
         </div>
 
         <!-- 健康检查报表表格 -->
-        <div class="bg-white rounded-lg shadow overflow-visible">
+        <div class="bg-white/80 backdrop-blur-md rounded-2xl shadow-soft border border-white/50 overflow-visible">
             <div class="px-6 py-4 border-b border-gray-200">
                 <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
                     <div>
@@ -203,7 +214,7 @@
                                     x-transition:leave="transition ease-in duration-150"
                                     x-transition:leave-start="opacity-100 transform scale-100"
                                     x-transition:leave-end="opacity-0 transform scale-95"
-                                    class="absolute z-50 top-full mt-2 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white text-sm rounded-lg px-4 py-3 shadow-xl w-96 whitespace-normal"
+                                    class="absolute z-50 top-full mt-2 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white text-sm rounded-xl px-4 py-3 shadow-xl w-96 whitespace-normal"
                                     style="display: none;">
                                     <div class="font-medium mb-2 text-green-400">健康状态 (Healthy)</div>
                                     <div class="leading-relaxed space-y-2">
@@ -247,7 +258,7 @@
                                     x-transition:leave="transition ease-in duration-150"
                                     x-transition:leave-start="opacity-100 transform scale-100"
                                     x-transition:leave-end="opacity-0 transform scale-95"
-                                    class="absolute z-50 top-full mt-2 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white text-sm rounded-lg px-4 py-3 shadow-xl w-96 whitespace-normal"
+                                    class="absolute z-50 top-full mt-2 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white text-sm rounded-xl px-4 py-3 shadow-xl w-96 whitespace-normal"
                                     style="display: none;">
                                     <div class="font-medium mb-2 text-yellow-400">警告状态 (Warning)</div>
                                     <div class="leading-relaxed space-y-2">
@@ -292,7 +303,7 @@
                                     x-transition:leave="transition ease-in duration-150"
                                     x-transition:leave-start="opacity-100 transform scale-100"
                                     x-transition:leave-end="opacity-0 transform scale-95"
-                                    class="absolute z-50 top-full mt-2 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white text-sm rounded-lg px-4 py-3 shadow-xl w-96 whitespace-normal"
+                                    class="absolute z-50 top-full mt-2 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white text-sm rounded-xl px-4 py-3 shadow-xl w-96 whitespace-normal"
                                     style="display: none;">
                                     <div class="font-medium mb-2 text-red-400">异常状态 (Unhealthy)</div>
                                     <div class="leading-relaxed space-y-2">
@@ -340,7 +351,7 @@
                                     x-transition:leave="transition ease-in duration-150"
                                     x-transition:leave-start="opacity-100 transform scale-100"
                                     x-transition:leave-end="opacity-0 transform scale-95"
-                                    class="absolute z-50 top-full mt-2 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white text-sm rounded-lg px-4 py-3 shadow-xl w-96 whitespace-normal"
+                                    class="absolute z-50 top-full mt-2 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white text-sm rounded-xl px-4 py-3 shadow-xl w-96 whitespace-normal"
                                     style="display: none;">
                                     <div class="font-medium mb-2 text-gray-400">未知状态 (Unknown)</div>
                                     <div class="leading-relaxed space-y-2">
@@ -485,7 +496,7 @@
                     x-transition:leave="transition ease-in duration-200"
                     x-transition:leave-start="opacity-100 transform scale-100"
                     x-transition:leave-end="opacity-0 transform scale-95"
-                    class="bg-white rounded-lg shadow-xl max-w-4xl w-full flex flex-col max-h-[90vh]">
+                    class="bg-white/80 backdrop-blur-md rounded-2xl shadow-soft border border-white/50-xl max-w-4xl w-full flex flex-col max-h-[90vh]">
 
                     <!-- 模态框头部 -->
                     <div class="flex items-center justify-between p-6 border-b border-gray-200 flex-shrink-0">
@@ -733,7 +744,7 @@
                     <!-- 模态框底部 -->
                     <div class="px-6 py-4 border-t border-gray-200 flex justify-end flex-shrink-0">
                         <button @click="showGroupDetails = false"
-                            class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-lg transition-colors">
+                            class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-xl transition-colors">
                             关闭
                         </button>
                     </div>
@@ -744,7 +755,7 @@
         <!-- 加载状态 -->
         <div x-show="loading"
             class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full flex items-center justify-center">
-            <div class="bg-white p-8 rounded-lg shadow-lg">
+            <div class="bg-white p-8 rounded-xl shadow-lg">
                 <div class="flex items-center space-x-4">
                     <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
                     <span class="text-lg font-medium text-gray-900">加载健康检查数据...</span>
@@ -755,7 +766,7 @@
         <!-- 确认提示框模态框 -->
         <div id="confirmModal" class="modal-overlay fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50 hidden">
             <div class="relative min-h-screen flex items-center justify-center p-4">
-                <div class="modal-content relative bg-white rounded-lg shadow-xl max-w-md w-full mx-auto transform transition-all duration-300">
+                <div class="modal-content relative bg-white/80 backdrop-blur-md rounded-2xl shadow-soft border border-white/50-xl max-w-md w-full mx-auto transform transition-all duration-300">
                     <!-- 模态框头部 -->
                     <div class="flex items-center justify-between p-6 border-b border-gray-200 modal-border">
                         <h3 class="text-lg font-medium text-gray-900">确认操作</h3>
@@ -800,7 +811,7 @@
         <!-- 消息提示框模态框 -->
         <div id="alertModal" class="modal-overlay fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50 hidden">
             <div class="relative min-h-screen flex items-center justify-center p-4">
-                <div class="modal-content relative bg-white rounded-lg shadow-xl max-w-md w-full mx-auto transform transition-all duration-300">
+                <div class="modal-content relative bg-white/80 backdrop-blur-md rounded-2xl shadow-soft border border-white/50-xl max-w-md w-full mx-auto transform transition-all duration-300">
                     <!-- 模态框头部 -->
                     <div class="flex items-center justify-between p-6 border-b border-gray-200 modal-border">
                         <h3 id="alertTitle" class="text-lg font-medium text-gray-900">提示</h3>
