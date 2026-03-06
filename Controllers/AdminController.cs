@@ -25,6 +25,7 @@ public class AdminController : ControllerBase
     private readonly ILogger<AdminController> _logger;
     private readonly IVersionService _versionService;
     private readonly IConfiguration _configuration;
+    private readonly IHealthCheckService _healthCheckService;
 
     public AdminController(
         IKeyManager keyManager,
@@ -32,7 +33,8 @@ public class AdminController : ControllerBase
         ISqlSugarClient db,
         ILogger<AdminController> logger,
         IVersionService versionService,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        IHealthCheckService healthCheckService)
     {
         _keyManager = keyManager;
         _requestLogger = requestLogger;
@@ -40,6 +42,7 @@ public class AdminController : ControllerBase
         _logger = logger;
         _versionService = versionService;
         _configuration = configuration;
+        _healthCheckService = healthCheckService;
     }
 
     /// <summary>
@@ -1079,6 +1082,60 @@ public class AdminController : ControllerBase
         {
             _logger.LogError(ex, "手动刷新健康检查时发生异常");
             return BadRequest(new { success = false, error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// 检测单个模型的可用性
+    /// </summary>
+    [HttpPost("health/models/{groupId}/{modelId}")]
+    public async Task<IActionResult> CheckSingleModelHealth(string groupId, string modelId)
+    {
+        try
+        {
+            // 获取该分组的第一个可用API密钥
+            var apiKeys = await _keyManager.GetGroupApiKeysAsync(groupId);
+            if (apiKeys.Count == 0)
+            {
+                return Ok(new
+                {
+                    success = false,
+                    is_healthy = false,
+                    status_code = 0,
+                    error_message = "该分组没有可用的API密钥",
+                    response_time_ms = 0,
+                    model_id = modelId,
+                    group_id = groupId
+                });
+            }
+
+            var apiKey = apiKeys[0];
+            var result = await _healthCheckService.CheckModelHealthAsync(groupId, apiKey, modelId);
+
+            return Ok(new
+            {
+                success = result.IsSuccess,
+                is_healthy = result.IsHealthy(),
+                status_code = result.StatusCode,
+                error_message = result.ErrorMessage,
+                response_time_ms = result.ResponseTimeMs,
+                model_id = modelId,
+                group_id = groupId
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "检测模型可用性时发生异常: {GroupId}, {ModelId}", groupId, modelId);
+            return Ok(new
+            {
+                success = false,
+                is_healthy = false,
+                status_code = 500,
+                error_message = $"检测异常: {ex.Message}",
+                response_time_ms = 0,
+                model_id = modelId,
+                group_id = groupId
+            });
         }
     }
 

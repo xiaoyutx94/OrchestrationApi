@@ -710,16 +710,151 @@
 
             <div x-show="!loadingModels && Object.keys(providerModels).length > 0" class="space-y-4">
                 <template x-for="(models, groupId) in providerModels" :key="groupId">
-                    <div class="border rounded-lg p-4">
-                        <h3 class="font-semibold text-gray-900 mb-3"
-                            x-text="models.group_name + ' (' + models.provider_type + ')'"></h3>
-                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                    <div class="border border-gray-200 rounded-xl overflow-hidden">
+                        <!-- 分组头部 -->
+                        <div class="bg-gray-50 px-4 py-3 flex items-center justify-between border-b border-gray-200">
+                            <div class="flex items-center gap-2">
+                                <h3 class="font-semibold text-gray-900 text-sm"
+                                    x-text="models.group_name"></h3>
+                                <span class="text-xs text-gray-500 bg-gray-200 px-1.5 py-0.5 rounded"
+                                    x-text="models.provider_type"></span>
+                                <span class="text-xs text-gray-400"
+                                    x-text="'(' + ((models.models && models.models.data) ? models.models.data.length : 0) + ' 个模型)'"></span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <!-- 检测进度条 -->
+                                <template x-if="modelCheckStatus[groupId] && modelCheckStatus[groupId].checking === true">
+                                    <div class="flex items-center gap-2">
+                                        <div class="w-24 bg-gray-200 rounded-full h-1.5 overflow-hidden">
+                                            <div class="bg-blue-500 h-full rounded-full transition-all duration-300"
+                                                :style="'width:' + (modelCheckStatus[groupId].total > 0 ? Math.round(modelCheckStatus[groupId].progress / modelCheckStatus[groupId].total * 100) : 0) + '%'"></div>
+                                        </div>
+                                        <span class="text-xs text-blue-600 font-medium tabular-nums"
+                                            x-text="modelCheckStatus[groupId].progress + '/' + modelCheckStatus[groupId].total"></span>
+                                    </div>
+                                </template>
+                                <!-- 检测完成统计 -->
+                                <template x-if="modelCheckStatus[groupId] && modelCheckStatus[groupId].checking === false && modelCheckResults[groupId]">
+                                    <div class="flex items-center gap-1.5 text-xs">
+                                        <span class="text-green-600 font-medium"
+                                            x-text="Object.values(modelCheckResults[groupId]).filter(r => r.status === 'success').length + ' 可用'"></span>
+                                        <span class="text-gray-300">|</span>
+                                        <span class="text-red-500 font-medium"
+                                            x-text="Object.values(modelCheckResults[groupId]).filter(r => r.status === 'failed').length + ' 不可用'"></span>
+                                    </div>
+                                </template>
+                                <!-- 检测按钮 -->
+                                <button @click="checkGroupModels(groupId, models)"
+                                    :disabled="modelCheckStatus[groupId]?.checking === true"
+                                    class="inline-flex items-center gap-1 text-xs font-medium bg-blue-500 hover:bg-blue-600 text-white pl-2 pr-2.5 py-1.5 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed shadow-sm">
+                                    <template x-if="modelCheckStatus[groupId]?.checking !== true">
+                                        <span class="flex items-center gap-1">
+                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                            </svg>
+                                            检测
+                                        </span>
+                                    </template>
+                                    <template x-if="modelCheckStatus[groupId]?.checking === true">
+                                        <span class="flex items-center gap-1">
+                                            <svg class="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
+                                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                                            </svg>
+                                            检测中
+                                        </span>
+                                    </template>
+                                </button>
+                                <!-- 删除渠道按钮 -->
+                                <button @click="deleteGroupFromModels(groupId, models.group_name)"
+                                    class="inline-flex items-center gap-1 text-xs font-medium text-red-600 hover:text-white hover:bg-red-500 border border-red-300 hover:border-red-500 pl-2 pr-2.5 py-1.5 rounded-lg transition"
+                                    title="删除此渠道">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                                    </svg>
+                                    删除
+                                </button>
+                            </div>
+                        </div>
+                        <!-- 模型列表 -->
+                        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3">
                             <template x-for="model in (models.models && models.models.data ? models.models.data : [])"
                                 :key="model.id">
-                                <div class="bg-gray-100 px-3 py-2 rounded text-sm">
-                                    <span class="font-mono" x-text="model.id"></span>
-                                    <span x-show="model.alias_name" class="text-gray-500 ml-2"
-                                        x-text="'(别名: ' + model.alias_name + ')'"></span>
+                                <div class="border-t border-gray-100 px-3 py-2.5 text-sm relative group/card"
+                                    :class="{
+                                        'bg-green-50': getModelCheckResult(groupId, model.id) === 'success',
+                                        'bg-red-50': getModelCheckResult(groupId, model.id) === 'failed',
+                                        'bg-blue-50': getModelCheckResult(groupId, model.id) === 'checking'
+                                    }">
+                                    <div class="flex items-start justify-between gap-2">
+                                        <div class="flex-1 min-w-0">
+                                            <!-- 模型名 + 状态图标 -->
+                                            <div class="flex items-center gap-1.5">
+                                                <!-- 状态指示器 -->
+                                                <template x-if="getModelCheckResult(groupId, model.id) === 'checking'">
+                                                    <svg class="animate-spin h-3.5 w-3.5 text-blue-500 flex-shrink-0" fill="none" viewBox="0 0 24 24">
+                                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                                                    </svg>
+                                                </template>
+                                                <template x-if="getModelCheckResult(groupId, model.id) === 'pending'">
+                                                    <span class="w-3.5 h-3.5 flex items-center justify-center flex-shrink-0">
+                                                        <span class="w-2 h-2 bg-gray-300 rounded-full"></span>
+                                                    </span>
+                                                </template>
+                                                <template x-if="getModelCheckResult(groupId, model.id) === 'success'">
+                                                    <svg class="h-3.5 w-3.5 text-green-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path>
+                                                    </svg>
+                                                </template>
+                                                <template x-if="getModelCheckResult(groupId, model.id) === 'failed'">
+                                                    <svg class="h-3.5 w-3.5 text-red-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"></path>
+                                                    </svg>
+                                                </template>
+                                                <span class="font-mono text-xs text-gray-900 truncate" x-text="model.id" :title="model.id"></span>
+                                            </div>
+                                            <!-- 别名 -->
+                                            <span x-show="model.alias_name" class="text-xs text-gray-400 truncate block pl-5"
+                                                x-text="'别名: ' + model.alias_name"></span>
+                                            <!-- 检测结果详情（成功时显示响应时间） -->
+                                            <template x-if="getModelCheckResult(groupId, model.id) === 'success'">
+                                                <div class="mt-1 pl-5 flex items-center gap-2">
+                                                    <span class="text-xs text-green-600 font-medium"
+                                                        x-text="'HTTP ' + (getModelCheckDetail(groupId, model.id)?.statusCode || 200)"></span>
+                                                    <span class="text-xs text-gray-400"
+                                                        x-text="(getModelCheckDetail(groupId, model.id)?.responseTime || 0) + 'ms'"></span>
+                                                </div>
+                                            </template>
+                                            <!-- 检测结果详情（失败时显示错误码和原因） -->
+                                            <template x-if="getModelCheckResult(groupId, model.id) === 'failed'">
+                                                <div class="mt-1 pl-5">
+                                                    <div class="flex items-center gap-2">
+                                                        <span class="text-xs font-medium px-1.5 py-0.5 rounded"
+                                                            :class="(getModelCheckDetail(groupId, model.id)?.statusCode || 0) >= 500 ? 'bg-red-100 text-red-700' : (getModelCheckDetail(groupId, model.id)?.statusCode || 0) >= 400 ? 'bg-orange-100 text-orange-700' : 'bg-gray-100 text-gray-700'"
+                                                            x-show="getModelCheckDetail(groupId, model.id)?.statusCode > 0"
+                                                            x-text="'HTTP ' + (getModelCheckDetail(groupId, model.id)?.statusCode || '')"></span>
+                                                        <span class="text-xs text-gray-400"
+                                                            x-show="(getModelCheckDetail(groupId, model.id)?.responseTime || 0) > 0"
+                                                            x-text="(getModelCheckDetail(groupId, model.id)?.responseTime || 0) + 'ms'"></span>
+                                                    </div>
+                                                    <p class="text-xs text-red-600 mt-0.5 line-clamp-2"
+                                                        x-text="getModelCheckError(groupId, model.id)"
+                                                        :title="getModelCheckError(groupId, model.id)"></p>
+                                                </div>
+                                            </template>
+                                        </div>
+                                        <!-- 删除模型按钮 -->
+                                        <button @click="deleteUnavailableModel(groupId, model.id)"
+                                            class="inline-flex items-center justify-center w-6 h-6 rounded-md text-red-500 bg-red-50 border border-red-200 hover:bg-red-100 hover:text-red-600 hover:border-red-300 transition-colors flex-shrink-0"
+                                            title="删除此模型"
+                                            aria-label="删除此模型">
+                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                                            </svg>
+                                        </button>
+                                    </div>
                                 </div>
                             </template>
                         </div>

@@ -193,14 +193,15 @@ function serilogManagement() {
             const days = parseInt(this.cleanupDays);
 
             if (isNaN(days) || days < 1) {
-                alert('请输入有效的天数');
+                await showAlert('请输入有效的天数', 'warning', '输入错误');
                 return;
             }
 
             const beforeDate = new Date();
             beforeDate.setDate(beforeDate.getDate() - days);
 
-            if (!confirm(`确定要删除 ${days} 天之前的日志吗？此操作不可恢复！`)) {
+            const confirmed = await showConfirm(`确定要删除 ${days} 天之前的日志吗？此操作不可恢复！`, '清理日志');
+            if (!confirmed) {
                 return;
             }
 
@@ -211,16 +212,16 @@ function serilogManagement() {
 
                 if (response.ok) {
                     const result = await response.json();
-                    alert(result.message || '删除成功');
+                    await showAlert(result.message || '删除成功', 'success', '操作成功');
                     this.showCleanupModal = false;
                     this.refreshLogs();
                 } else {
                     const error = await response.json();
-                    alert('删除失败: ' + (error.message || '未知错误'));
+                    await showAlert('删除失败: ' + (error.message || '未知错误'), 'error', '删除失败');
                 }
             } catch (error) {
                 console.error('删除日志失败:', error);
-                alert('删除失败: ' + error.message);
+                await showAlert('删除失败: ' + error.message, 'error', '删除失败');
             }
         },
 

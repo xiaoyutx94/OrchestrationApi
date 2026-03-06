@@ -159,6 +159,8 @@ function multiProviderDashboard() {
         providerModels: {},
         selectedProvider: "",
         loadingModels: false,
+        modelCheckStatus: {},    // { groupId: { checking: bool, progress: number, total: number } }
+        modelCheckResults: {},   // { groupId: { modelId: { status: 'success'|'failed'|'checking', error: string|null } } }
         lastUpdate: new Date(),
 
         // 用户信息管理相关
@@ -1012,6 +1014,196 @@ function multiProviderDashboard() {
             }
         },
 
+        async checkGroupModels(groupId, models) {
+            const list = models.models && models.models.data ? models.models.data : [];
+            if (list.length === 0) return;
+
+            // 初始化状态
+            this.modelCheckStatus = {
+                ...this.modelCheckStatus,
+                [groupId]: { checking: true, progress: 0, total: list.length }
+            };
+            this.modelCheckResults = {
+                ...this.modelCheckResults,
+                [groupId]: {}
+            };
+
+            // 标记所有模型为 pending
+            const results = {};
+            list.forEach(m => {
+                results[m.id] = { status: 'pending', error: null, statusCode: null, responseTime: null };
+            });
+            this.modelCheckResults = { ...this.modelCheckResults, [groupId]: results };
+
+            // Worker pool 并发控制（最多3个并发）
+            const concurrency = 3;
+            let idx = 0;
+            let done = 0;
+
+            const work = async () => {
+                while (idx < list.length) {
+                    const i = idx++;
+                    const model = list[i];
+
+                    // 标记当前模型为 checking
+                    const updatingResults = { ...this.modelCheckResults[groupId] };
+                    updatingResults[model.id] = { status: 'checking', error: null, statusCode: null, responseTime: null };
+                    this.modelCheckResults = { ...this.modelCheckResults, [groupId]: updatingResults };
+
+                    try {
+                        const authToken = localStorage.getItem('authToken');
+                        const response = await fetch(`/admin/health/models/${groupId}/${encodeURIComponent(model.id)}`, {
+                            method: 'POST',
+                            headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {}
+                        });
+                        const data = await response.json();
+
+                        const newResults = { ...this.modelCheckResults[groupId] };
+                        if (data.success && data.is_healthy) {
+                            newResults[model.id] = {
+                                status: 'success',
+                                error: null,
+                                statusCode: data.status_code || 200,
+                                responseTime: data.response_time_ms
+                            };
+                        } else {
+                            newResults[model.id] = {
+                                status: 'failed',
+                                error: data.error_message || '检测失败',
+                                statusCode: data.status_code || 0,
+                                responseTime: data.response_time_ms || 0
+                            };
+                        }
+                        this.modelCheckResults = { ...this.modelCheckResults, [groupId]: newResults };
+                    } catch (error) {
+                        const newResults = { ...this.modelCheckResults[groupId] };
+                        newResults[model.id] = {
+                            status: 'failed',
+                            error: '网络错误: ' + error.message,
+                            statusCode: 0,
+                            responseTime: 0
+                        };
+                        this.modelCheckResults = { ...this.modelCheckResults, [groupId]: newResults };
+                    }
+
+                    done++;
+                    this.modelCheckStatus = {
+                        ...this.modelCheckStatus,
+                        [groupId]: { ...this.modelCheckStatus[groupId], progress: done }
+                    };
+                }
+            };
+
+            await Promise.all(Array.from({ length: Math.min(concurrency, list.length) }, () => work()));
+
+            // 检测完成
+            this.modelCheckStatus = {
+                ...this.modelCheckStatus,
+                [groupId]: { ...this.modelCheckStatus[groupId], checking: false }
+            };
+        },
+
+        getModelCheckResult(groupId, modelId) {
+            if (!this.modelCheckResults[groupId]) return null;
+            const r = this.modelCheckResults[groupId][modelId];
+            return r ? r.status : null;
+        },
+
+        getModelCheckError(groupId, modelId) {
+            if (!this.modelCheckResults[groupId]) return '';
+            const r = this.modelCheckResults[groupId][modelId];
+            return r ? (r.error || '') : '';
+        },
+
+        getModelCheckDetail(groupId, modelId) {
+            if (!this.modelCheckResults[groupId]) return null;
+            return this.modelCheckResults[groupId][modelId] || null;
+        },
+
+        async deleteUnavailableModel(groupId, modelId) {
+            const confirmed = await showConfirm(`确定要删除不可用的模型 "${modelId}" 吗？\n此操作将同时清除模型映射/别名。`, '删除模型');
+            if (!confirmed) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/admin/groups/${groupId}/models/${encodeURIComponent(modelId)}`, {
+                    method: 'DELETE'
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    // 从本地 providerModels 中移除该模型
+                    if (this.providerModels[groupId] && this.providerModels[groupId].models && this.providerModels[groupId].models.data) {
+                        this.providerModels[groupId].models.data = this.providerModels[groupId].models.data.filter(m => m.id !== modelId);
+                        this.providerModels = { ...this.providerModels };
+                    }
+
+                    // 清除对应检测结果
+                    if (this.modelCheckResults[groupId]) {
+                        const newResults = { ...this.modelCheckResults[groupId] };
+                        delete newResults[modelId];
+                        this.modelCheckResults = { ...this.modelCheckResults, [groupId]: newResults };
+                    }
+
+                    this.showMessage(`模型 "${modelId}" 已成功删除`, 'success');
+                } else {
+                    this.showMessage('删除失败: ' + (data.error || '未知错误'), 'error');
+                }
+            } catch (error) {
+                this.showMessage('删除失败: ' + error.message, 'error');
+            }
+        },
+
+        async deleteGroupFromModels(groupId, groupName) {
+            const confirmed = await showConfirm(`确定要删除服务商渠道 "${groupName}" 吗？\n\n此操作将删除该渠道的所有配置、API密钥和模型，不可恢复！`, '删除服务商渠道');
+            if (!confirmed) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/admin/groups/${groupId}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    // 从本地 providerModels 中移除
+                    const newModels = { ...this.providerModels };
+                    delete newModels[groupId];
+                    this.providerModels = newModels;
+
+                    // 清除检测状态
+                    const newStatus = { ...this.modelCheckStatus };
+                    delete newStatus[groupId];
+                    this.modelCheckStatus = newStatus;
+
+                    const newResults = { ...this.modelCheckResults };
+                    delete newResults[groupId];
+                    this.modelCheckResults = newResults;
+
+                    // 从密钥状态中移除
+                    if (this.keyStatus.groups && this.keyStatus.groups[groupId]) {
+                        delete this.keyStatus.groups[groupId];
+                    }
+
+                    // 重新加载服务商状态
+                    await this.loadProviderStatuses();
+                    this.recalculateKeyStatus();
+
+                    this.showMessage(`服务商渠道 "${groupName}" 已成功删除`, 'success');
+                } else {
+                    let errorMessage = '删除失败';
+                    try {
+                        const data = await response.json();
+                        errorMessage = data.error || data.message || errorMessage;
+                    } catch (e) {}
+                    this.showMessage(errorMessage, 'error');
+                }
+            } catch (error) {
+                this.showMessage('删除失败: ' + error.message, 'error');
+            }
+        },
+
         // 移除自动刷新功能
         // toggleAutoRefresh() {
         //     this.autoRefresh = !this.autoRefresh;
@@ -1327,19 +1519,19 @@ function multiProviderDashboard() {
                     this.keyStatus.total_invalid > 0;
                 if (hasInvalidKeys) {
                     // 如果有失效密钥，可以选择打开分组管理页面
-                    if (
-                        confirm(
-                            `发现 ${this.keyStatus.total_invalid} 个失效密钥，是否打开分组管理页面进行处理？`,
-                        )
-                    ) {
+                    const goToGroups = await showConfirm(
+                        `发现 ${this.keyStatus.total_invalid} 个失效密钥，是否打开分组管理页面进行处理？`,
+                        '密钥验证结果'
+                    );
+                    if (goToGroups) {
                         window.open("/groups", "_blank");
                     }
                 } else {
-                    alert("所有密钥都是有效的！");
+                    await showAlert("所有密钥都是有效的！", "success", "验证通过");
                 }
             } catch (error) {
                 console.error("Failed to validate keys:", error);
-                alert("验证密钥时出错，请稍后重试");
+                await showAlert("验证密钥时出错，请稍后重试", "error", "验证失败");
             } finally {
                 this.validatingAllKeys = false;
             }
@@ -1377,7 +1569,7 @@ function multiProviderDashboard() {
                     !groupData.api_keys ||
                     groupData.api_keys.length === 0
                 ) {
-                    alert("该分组没有配置API密钥");
+                    await showAlert("该分组没有配置API密钥", "warning", "无法验证");
                     return;
                 }
 
@@ -1387,7 +1579,7 @@ function multiProviderDashboard() {
                 );
 
                 if (validKeys.length === 0) {
-                    alert("该分组没有有效的API密钥");
+                    await showAlert("该分组没有有效的API密钥", "warning", "无法验证");
                     return;
                 }
 
@@ -1436,7 +1628,7 @@ function multiProviderDashboard() {
                         `📊 总计：${totalCount}\n\n` +
                         `验证结果已保存到密钥管理列表中`;
 
-                    alert(message);
+                    await showAlert(message, "success", "密钥验证完成");
 
                     // 刷新服务商状态和密钥状态
                     await this.loadProviderStatuses();
@@ -1446,7 +1638,7 @@ function multiProviderDashboard() {
                 }
             } catch (error) {
                 console.error("验证分组密钥失败:", error);
-                alert(`验证分组密钥失败：${error.message}`);
+                await showAlert(`验证分组密钥失败：${error.message}`, "error", "验证失败");
             } finally {
                 // 清除验证状态
                 if (this.validatingGroups) {
@@ -1461,7 +1653,7 @@ function multiProviderDashboard() {
             }
         },
 
-        showProviderDetails(groupId, provider) {
+        async showProviderDetails(groupId, provider) {
             const keyStatusData = this.keyStatus.groups[groupId];
             let detailsHtml = `
                         <div class="space-y-4">
@@ -1524,12 +1716,9 @@ function multiProviderDashboard() {
 
             detailsHtml += "</div>";
 
-            // 这里可以使用一个模态框来显示详情，暂时使用alert
-            const tempDiv = document.createElement("div");
-            tempDiv.innerHTML = detailsHtml;
-            alert(
-                `${provider.group_name} 详细信息\n\n状态: ${provider.healthy ? "健康" : "异常"}\n响应时间: ${this.formatResponseTime(provider.response_time)}\n密钥: ${provider.active_keys}/${provider.total_keys}`,
-            );
+            const statusText = provider.healthy ? "健康" : "异常";
+            const detailMsg = `状态: ${statusText}\n响应时间: ${this.formatResponseTime(provider.response_time)}\n密钥: ${provider.active_keys}/${provider.total_keys}`;
+            await showAlert(detailMsg, provider.healthy ? "success" : "warning", `${provider.group_name} 详细信息`);
         },
 
         // 分组管理方法
@@ -1746,7 +1935,7 @@ function multiProviderDashboard() {
                 await this.loadKeyValidationStatus(groupId);
             } catch (error) {
                 console.error("获取分组数据失败:", error);
-                alert("获取分组数据失败，请稍后重试");
+                await showAlert("获取分组数据失败，请稍后重试", "error", "加载失败");
             }
         },
 
@@ -1782,11 +1971,11 @@ function multiProviderDashboard() {
         },
 
         async deleteGroup(groupId, provider) {
-            if (
-                !confirm(
-                    `确定要删除分组 "${provider.group_name}" 吗？此操作不可恢复。`,
-                )
-            ) {
+            const confirmed = await showConfirm(
+                `确定要删除分组 "${provider.group_name}" 吗？\n\n此操作将同时删除相关的健康检查记录，且不可恢复！`,
+                '删除服务商分组'
+            );
+            if (!confirmed) {
                 return;
             }
 
@@ -1925,7 +2114,8 @@ function multiProviderDashboard() {
                             // 如果别名已存在且映射到不同的原始模型，给出警告
                             const message = `警告：别名 "${alias}" 已映射到模型 "${modelMappings[alias]}"，现在将被覆盖为 "${original}"。\n\n如果您想要多个模型都使用相同的别名，建议：\n1. 在不同的分组中分别设置映射\n2. 或者使用不同的别名（如 gpt-4-v1, gpt-4-v2）`;
 
-                            if (!confirm(message + '\n\n是否继续保存？')) {
+                            const overrideConfirmed = await showConfirm(message + '\n\n是否继续保存？', '别名冲突警告');
+                            if (!overrideConfirmed) {
                                 return; // 用户取消保存
                             }
                         }
@@ -2017,40 +2207,28 @@ function multiProviderDashboard() {
                 if (response.ok) {
                     this.showMessage(data.message, "success");
 
-                    // 无论是创建还是编辑模式，都重新加载服务商状态以确保数据一致性
-                    // 特别是在编辑时修改了API密钥列表的情况下，需要更新密钥数量显示
+                    // 在关闭模态框前保存编辑状态（closeGroupModal 会清空 editingGroupId）
+                    const wasEditing = !this.showCreateGroupModal && !!this.editingGroupId;
+
                     this.closeGroupModal();
+
+                    // 重新加载服务商状态，但不重置分页
                     await this.loadProviderStatuses();
-                    
+
                     // 重新加载密钥状态以确保密钥数量正确显示
                     await this.loadKeyStatus();
 
                     // 如果是编辑模式，恢复页面状态以保持用户体验
-                    if (!this.showCreateGroupModal && this.editingGroupId) {
+                    if (wasEditing) {
                         this.providerPage = currentPage;
                         this.providerSearchQuery = currentSearchQuery;
                         this.providerStatusFilter = currentStatusFilter;
                         this.providerTypeFilter = currentTypeFilter;
                         this.providerEnabledFilter = currentEnabledFilter;
-                        
+
                         // 重新过滤服务商以反映更新，但不重置页面位置
                         this.filterProviders(false);
                     }
-
-                    // 额外的数据验证，确保保存的数据正确
-                    setTimeout(async () => {
-                        if (
-                            this.editingGroupId &&
-                            this.providerStatuses[
-                            this.editingGroupId
-                            ]
-                        ) {
-                            const savedData =
-                                this.providerStatuses[
-                                this.editingGroupId
-                                ];
-                        }
-                    }, 500);
                 } else {
                     this.showMessage(
                         data.message || "操作失败",
@@ -2312,14 +2490,14 @@ function multiProviderDashboard() {
         },
 
         // 删除选中的密钥
-        deleteSelectedKeys() {
+        async deleteSelectedKeys() {
             if (this.selectedKeys.length === 0) return;
 
-            if (
-                !confirm(
-                    `确定要删除选中的 ${this.selectedKeys.length} 个密钥吗？`,
-                )
-            ) {
+            const confirmed = await showConfirm(
+                `确定要删除选中的 ${this.selectedKeys.length} 个密钥吗？`,
+                '删除选中密钥'
+            );
+            if (!confirmed) {
                 return;
             }
 
@@ -2355,7 +2533,7 @@ function multiProviderDashboard() {
         },
 
         // 删除失效密钥
-        deleteInvalidKeys() {
+        async deleteInvalidKeys() {
             // 找出所有失效的密钥索引
             const invalidIndexes = [];
             this.groupFormData.api_keys.forEach((key, index) => {
@@ -2372,11 +2550,11 @@ function multiProviderDashboard() {
                 return;
             }
 
-            if (
-                !confirm(
-                    `确定要删除 ${invalidIndexes.length} 个失效密钥吗？`,
-                )
-            ) {
+            const deleteInvalidConfirmed = await showConfirm(
+                `确定要删除 ${invalidIndexes.length} 个失效密钥吗？`,
+                '删除失效密钥'
+            );
+            if (!deleteInvalidConfirmed) {
                 return;
             }
 
@@ -2595,13 +2773,14 @@ function multiProviderDashboard() {
         },
 
         // 清空所有密钥
-        clearAllKeys() {
+        async clearAllKeys() {
             if (this.groupFormData.api_keys.filter(k => k.trim()).length === 0) {
                 this.showMessage("没有密钥需要清空", "info");
                 return;
             }
 
-            if (!confirm("确定要清空所有密钥吗？此操作不可恢复。")) {
+            const clearConfirmed = await showConfirm('确定要清空所有密钥吗？此操作不可恢复。', '清空所有密钥');
+            if (!clearConfirmed) {
                 return;
             }
 
@@ -2757,7 +2936,8 @@ function multiProviderDashboard() {
                 }
             }
 
-            if (!confirm(`确定要删除 ${localInvalidCount} 个失效密钥吗？此操作不可恢复。`)) {
+            const bulkDeleteConfirmed = await showConfirm(`确定要删除 ${localInvalidCount} 个失效密钥吗？此操作不可恢复。`, '批量删除失效密钥');
+            if (!bulkDeleteConfirmed) {
                 return;
             }
 
@@ -4173,11 +4353,11 @@ function multiProviderDashboard() {
         },
 
         async deleteProxyKey(keyId) {
-            if (
-                !confirm(
-                    "确定要删除这个代理密钥吗？删除后无法恢复。",
-                )
-            ) {
+            const confirmed = await showConfirm(
+                '确定要删除这个代理密钥吗？删除后无法恢复。',
+                '删除代理密钥'
+            );
+            if (!confirmed) {
                 return;
             }
 
@@ -4487,9 +4667,9 @@ function multiProviderDashboard() {
             this.searchProxyKeys();
         },
 
-        viewProviderDetails(groupId) {
+        async viewProviderDetails(groupId) {
             // 实现查看服务商详情的逻辑
-            alert(`查看服务商 ${groupId} 的详细信息`);
+            await showAlert(`查看服务商 ${groupId} 的详细信息`, "info", "服务商详情");
         },
 
         exportHealthReport() {
@@ -4783,7 +4963,7 @@ function multiProviderDashboard() {
                         statsText += `  使用次数: ${stats.usage_count}\n`;
                         statsText += `  最后使用: ${stats.last_used ? this.formatDate(stats.last_used) : "从未使用"}\n\n`;
                     }
-                    alert(statsText);
+                    await showAlert(statsText, "info", "分组使用统计");
                 } else {
                     this.showMessage(
                         "获取统计信息失败: " +
@@ -4833,7 +5013,8 @@ function multiProviderDashboard() {
         },
 
         async resetGroupUsageStats(groupId) {
-            if (!confirm('确定要重置该分组的所有密钥使用统计吗？此操作不可恢复。')) {
+            const resetConfirmed = await showConfirm('确定要重置该分组的所有密钥使用统计吗？此操作不可恢复。', '重置使用统计');
+            if (!resetConfirmed) {
                 return;
             }
 
