@@ -10,758 +10,339 @@
     <link rel="icon" href="/favicon.png?v=2" type="image/png">
     <link rel="shortcut icon" href="/favicon.ico?v=2" type="image/x-icon">
     <link rel="apple-touch-icon" href="/favicon.png?v=2" />
-
-    <!-- 早期认证检查脚本 - 在页面渲染前执行 -->
-    <script>
-        // 立即检查认证状态，避免显示未授权内容
-        (function() {
-            const token = localStorage.getItem('authToken');
-            if (!token) {
-                // 没有token，立即跳转到登录页
-                window.location.href = '/login';
-                return;
-            }
-
-            // 有token，但需要验证其有效性
-            // 使用同步方式快速检查token格式和过期时间
-            try {
-                // 简单的JWT token格式检查
-                const parts = token.split('.');
-                if (parts.length !== 3) {
-                    localStorage.removeItem('authToken');
-                    localStorage.removeItem('tokenExpires');
-                    window.location.href = '/login';
-                    return;
-                }
-
-                // 检查本地存储的过期时间
-                const tokenExpires = localStorage.getItem('tokenExpires');
-                if (tokenExpires) {
-                    const expiresAt = new Date(tokenExpires);
-                    const now = new Date();
-                    if (now >= expiresAt) {
-                        // token已过期
-                        localStorage.removeItem('authToken');
-                        localStorage.removeItem('tokenExpires');
-                        window.location.href = '/login';
-                        return;
-                    }
-                }
-
-                // token格式正确且未过期，继续加载页面
-                // 详细的服务器端验证将在Alpine.js初始化时进行
-            } catch (error) {
-                // token解析失败，清理并跳转
-                localStorage.removeItem('authToken');
-                localStorage.removeItem('tokenExpires');
-                window.location.href = '/login';
-                return;
-            }
-        })();
-    </script>
-
-    <!-- Google Fonts: Inter -->
+    <script src="js/app-shell.js"></script>
+    <script>AppShell.earlyAuthCheck();document.documentElement.classList.add("app-pending");</script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="js/theme-config.js"></script>
     <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <link rel="stylesheet" href="css/app.css">
     <link rel="stylesheet" href="css/dashboard.css">
+    <link rel="stylesheet" href="css/logs.css">
     <link rel="stylesheet" href="css/modal-components.css">
 </head>
 
-<body class="font-sans bg-gray-50 min-h-screen text-gray-800">
-    <div class="container mx-auto px-2 sm:px-4 py-4 sm:py-8" x-data="healthReportDashboard()">
-        <!-- Header -->
-        <div class="flex flex-col lg:flex-row lg:justify-between lg:items-center mb-8 space-y-4 lg:space-y-0 bg-white/80 backdrop-blur-md p-6 rounded-2xl shadow-soft border border-white/50 sticky top-4 z-40 transition-all duration-300 hover:shadow-lg">
-            <div>
-                <div class="flex items-center gap-3 mb-1">
-                    <div class="w-10 h-10 bg-gradient-to-tr from-primary-500 to-primary-600 rounded-xl shadow-lg shadow-primary-500/20 flex items-center justify-center text-white">
-                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                    </div>
-                    <h1 class="text-2xl md:text-3xl font-bold text-gray-900 tracking-tight">
-                        健康检查报表
-                    </h1>
-                </div>
-                <p class="text-gray-500 text-sm md:text-base ml-1">监控服务商、API密钥和模型的健康状态</p>
-            </div>
-
-            <div class="flex flex-col space-y-3 lg:space-y-0 lg:flex-row lg:space-x-4">
-                <!-- 返回仪表板按钮 -->
-                <a href="/dashboard"
-                    class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-xl text-center transition-colors">
-                    返回仪表板
-                </a>
-                <a href="/serilog"
-                    class="bg-purple-500 hover:bg-purple-600 text-white px-3 py-2 sm:px-4 rounded-xl transition duration-200 text-center text-sm">
-                    <span>系统日志</span>
-                </a>
-                <!-- 手动触发健康检查按钮 -->
-                <button @click="triggerHealthCheck()" :disabled="triggeringCheck"
-                    class="bg-blue-500 hover:bg-blue-600 disabled:bg-blue-300 text-white px-4 py-2 rounded-xl transition-colors">
-                    <span x-show="!triggeringCheck">手动检查</span>
-                    <span x-show="triggeringCheck">检查中...</span>
-                </button>
-
-                <!-- 刷新按钮 -->
-                <button @click="refreshAllData()" :disabled="loading"
-                    class="bg-green-500 hover:bg-green-600 disabled:bg-green-300 text-white px-4 py-2 rounded-xl transition-colors">
-                    <span x-show="!loading">刷新数据</span>
-                    <span x-show="loading">加载中...</span>
-                </button>
-            </div>
-        </div>
-
-        <!-- 概览统计 -->
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-            <div class="bg-white/80 backdrop-blur-md rounded-2xl shadow-soft border border-white/50 p-6">
-                <div class="flex items-center">
-                    <div class="p-2 bg-blue-100 rounded-xl">
-                        <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                        </svg>
-                    </div>
-                    <div class="ml-4">
-                        <p class="text-sm font-medium text-gray-600">健康服务商</p>
-                        <p class="text-2xl font-semibold text-gray-900" x-text="overview.healthy_providers || 0"></p>
+<body class="app-body">
+    <div class="app-shell" x-data="healthReportDashboard()">
+        <div id="app-sidebar-root"></div>
+        <div class="app-main">
+            <header class="app-topbar">
+                <div class="app-topbar-left">
+                    <button type="button" class="btn btn-ghost btn-sm sidebar-toggle" data-app-action="toggle-sidebar" aria-label="切换侧栏">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+                    </button>
+                    <div class="app-topbar-titles">
+                        <h1 class="app-page-title">健康检查报表</h1>
+                        <p class="app-page-sub">监控服务商、密钥与模型健康状态</p>
                     </div>
                 </div>
-            </div>
-
-            <div class="bg-white/80 backdrop-blur-md rounded-2xl shadow-soft border border-white/50 p-6">
-                <div class="flex items-center">
-                    <div class="p-2 bg-green-100 rounded-xl">
-                        <svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-3a1 1 0 011-1h2.586l6.414-6.414a6 6 0 015.743-7.743z">
-                            </path>
-                        </svg>
-                    </div>
-                    <div class="ml-4">
-                        <p class="text-sm font-medium text-gray-600">健康密钥</p>
-                        <p class="text-2xl font-semibold text-gray-900" x-text="overview.healthy_keys || 0"></p>
-                    </div>
+                <div class="app-topbar-right">
+                    <button type="button" class="btn btn-primary btn-sm" @click="triggerHealthCheck()" :disabled="triggeringCheck">
+                        <span x-show="!triggeringCheck">手动检查</span>
+                        <span x-show="triggeringCheck">检查中...</span>
+                    </button>
+                    <button type="button" class="btn btn-secondary btn-sm" @click="refreshAllData()" :disabled="loading">
+                        <span x-show="!loading">刷新</span>
+                        <span x-show="loading">加载中...</span>
+                    </button>
                 </div>
-            </div>
-
-            <div class="bg-white/80 backdrop-blur-md rounded-2xl shadow-soft border border-white/50 p-6">
-                <div class="flex items-center">
-                    <div class="p-2 bg-purple-100 rounded-xl">
-                        <svg class="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10">
-                            </path>
-                        </svg>
+            </header>
+            <main class="app-content">
+                <!-- 紧凑概览 -->
+                <section class="log-stats mb-3" aria-label="健康概览">
+                    <div class="log-stat is-ok">
+                        <span class="log-stat-label">健康服务商</span>
+                        <span class="log-stat-value tabular-nums" x-text="overview.healthy_providers || 0">0</span>
                     </div>
-                    <div class="ml-4">
-                        <p class="text-sm font-medium text-gray-600">健康模型</p>
-                        <p class="text-2xl font-semibold text-gray-900" x-text="overview.healthy_models || 0"></p>
+                    <div class="log-stat is-info">
+                        <span class="log-stat-label">健康密钥</span>
+                        <span class="log-stat-value tabular-nums" x-text="overview.healthy_keys || 0">0</span>
                     </div>
-                </div>
-            </div>
-
-            <div class="bg-white/80 backdrop-blur-md rounded-2xl shadow-soft border border-white/50 p-6">
-                <div class="flex items-center">
-                    <div class="p-2 bg-yellow-100 rounded-xl">
-                        <svg class="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M13 10V3L4 14h7v7l9-11h-7z"></path>
-                        </svg>
+                    <div class="log-stat is-purple">
+                        <span class="log-stat-label">健康模型</span>
+                        <span class="log-stat-value tabular-nums" x-text="overview.healthy_models || 0">0</span>
                     </div>
-                    <div class="ml-4">
-                        <p class="text-sm font-medium text-gray-600">整体成功率</p>
-                        <p class="text-2xl font-semibold text-gray-900"
-                            x-text="(overview.overall_success_rate || 0).toFixed(1) + '%'"></p>
+                    <div class="log-stat">
+                        <span class="log-stat-label">整体成功率</span>
+                        <span class="log-stat-value tabular-nums"
+                            x-text="(overview.overall_success_rate || 0).toFixed(1) + '%'">0%</span>
                     </div>
-                </div>
-            </div>
-        </div>
+                </section>
 
-        <!-- 健康检查报表表格 -->
-        <div class="bg-white/80 backdrop-blur-md rounded-2xl shadow-soft border border-white/50 overflow-visible">
-            <div class="px-6 py-4 border-b border-gray-200">
-                <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-                    <div>
-                        <h3 class="text-lg font-medium text-gray-900">服务商健康状态</h3>
-                        <p class="text-sm text-gray-500">显示所有启用服务商的健康检查状态</p>
-                    </div>
-
-                    <!-- 状态说明 -->
-                    <div class="flex flex-col sm:flex-row sm:items-center gap-3" x-data="{ activeTooltip: null }">
-                        <span class="text-sm font-medium text-gray-700">状态说明:</span>
-                        <div class="flex flex-wrap items-center gap-4">
-                            <!-- 健康状态 -->
-                            <div class="relative flex items-center gap-1.5">
-                                <div class="w-3 h-3 bg-green-500 rounded-full"></div>
-                                <button @click="activeTooltip = activeTooltip === 'healthy' ? null : 'healthy'"
-                                    @mouseleave="activeTooltip = null"
-                                    class="flex items-center gap-1 text-sm text-gray-700 hover:text-green-600 hover:underline cursor-pointer transition-colors">
-                                    <span>健康</span>
-                                    <svg class="w-3 h-3 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
-                                        <path fill-rule="evenodd"
-                                            d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
-                                            clip-rule="evenodd"></path>
-                                    </svg>
-                                </button>
-                                <!-- 健康状态详细说明 -->
-                                <div x-show="activeTooltip === 'healthy'"
-                                    x-transition:enter="transition ease-out duration-200"
-                                    x-transition:enter-start="opacity-0 transform scale-95"
-                                    x-transition:enter-end="opacity-100 transform scale-100"
-                                    x-transition:leave="transition ease-in duration-150"
-                                    x-transition:leave-start="opacity-100 transform scale-100"
-                                    x-transition:leave-end="opacity-0 transform scale-95"
-                                    class="absolute z-50 top-full mt-2 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white text-sm rounded-xl px-4 py-3 shadow-xl w-96 whitespace-normal"
-                                    style="display: none;">
-                                    <div class="font-medium mb-2 text-green-400">健康状态 (Healthy)</div>
-                                    <div class="leading-relaxed space-y-2">
-                                        <div><strong>触发条件：</strong>连续失败次数为0且至少有1次成功检查</div>
-                                        <div><strong>状态含义：</strong>服务商、API密钥或模型工作正常，所有检查均通过</div>
-                                        <div><strong>检查类型：</strong>
-                                            <ul class="ml-4 mt-1 space-y-1">
-                                                <li>• 服务商检查：/models端点响应正常 (10s超时)</li>
-                                                <li>• API密钥检查：密钥验证通过 (10s超时)</li>
-                                                <li>• 模型检查：模型调用成功 (15s超时)</li>
-                                            </ul>
-                                        </div>
-                                        <div><strong>技术指标：</strong>HTTP状态码200-299，响应时间在合理范围内</div>
-                                        <div><strong>检查频率：</strong>后台服务每30分钟自动检查，密钥恢复检查每5分钟</div>
-                                    </div>
-                                    <!-- 箭头 -->
-                                    <div
-                                        class="absolute bottom-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-b-4 border-transparent border-b-gray-900">
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- 警告状态 -->
-                            <div class="relative flex items-center gap-1.5">
-                                <div class="w-3 h-3 bg-yellow-500 rounded-full"></div>
-                                <button @click="activeTooltip = activeTooltip === 'warning' ? null : 'warning'"
-                                    @mouseleave="activeTooltip = null"
-                                    class="flex items-center gap-1 text-sm text-gray-700 hover:text-yellow-600 hover:underline cursor-pointer transition-colors">
-                                    <span>警告</span>
-                                    <svg class="w-3 h-3 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
-                                        <path fill-rule="evenodd"
-                                            d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
-                                            clip-rule="evenodd"></path>
-                                    </svg>
-                                </button>
-                                <!-- 警告状态详细说明 -->
-                                <div x-show="activeTooltip === 'warning'"
-                                    x-transition:enter="transition ease-out duration-200"
-                                    x-transition:enter-start="opacity-0 transform scale-95"
-                                    x-transition:enter-end="opacity-100 transform scale-100"
-                                    x-transition:leave="transition ease-in duration-150"
-                                    x-transition:leave-start="opacity-100 transform scale-100"
-                                    x-transition:leave-end="opacity-0 transform scale-95"
-                                    class="absolute z-50 top-full mt-2 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white text-sm rounded-xl px-4 py-3 shadow-xl w-96 whitespace-normal"
-                                    style="display: none;">
-                                    <div class="font-medium mb-2 text-yellow-400">警告状态 (Warning)</div>
-                                    <div class="leading-relaxed space-y-2">
-                                        <div><strong>触发条件：</strong>连续失败次数为1-2次（大于0且小于3）</div>
-                                        <div><strong>状态含义：</strong>服务出现间歇性问题，但尚未达到完全不可用的程度</div>
-                                        <div><strong>常见原因：</strong>
-                                            <ul class="ml-4 mt-1 space-y-1">
-                                                <li>• 网络延迟或临时连接问题</li>
-                                                <li>• 服务商API限流或负载过高</li>
-                                                <li>• API密钥配额即将耗尽</li>
-                                                <li>• 模型暂时不可用或维护中</li>
-                                            </ul>
-                                        </div>
-                                        <div><strong>影响程度：</strong>服务可能出现偶发性失败，建议监控并准备备用方案</div>
-                                        <div><strong>处理建议：</strong>检查网络连接、API配额使用情况，考虑启用其他健康的服务商</div>
-                                    </div>
-                                    <!-- 箭头 -->
-                                    <div
-                                        class="absolute bottom-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-b-4 border-transparent border-b-gray-900">
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- 异常状态 -->
-                            <div class="relative flex items-center gap-1.5">
-                                <div class="w-3 h-3 bg-red-500 rounded-full"></div>
-                                <button @click="activeTooltip = activeTooltip === 'error' ? null : 'error'"
-                                    @mouseleave="activeTooltip = null"
-                                    class="flex items-center gap-1 text-sm text-gray-700 hover:text-red-600 hover:underline cursor-pointer transition-colors">
-                                    <span>异常</span>
-                                    <svg class="w-3 h-3 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
-                                        <path fill-rule="evenodd"
-                                            d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
-                                            clip-rule="evenodd"></path>
-                                    </svg>
-                                </button>
-                                <!-- 异常状态详细说明 -->
-                                <div x-show="activeTooltip === 'error'"
-                                    x-transition:enter="transition ease-out duration-200"
-                                    x-transition:enter-start="opacity-0 transform scale-95"
-                                    x-transition:enter-end="opacity-100 transform scale-100"
-                                    x-transition:leave="transition ease-in duration-150"
-                                    x-transition:leave-start="opacity-100 transform scale-100"
-                                    x-transition:leave-end="opacity-0 transform scale-95"
-                                    class="absolute z-50 top-full mt-2 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white text-sm rounded-xl px-4 py-3 shadow-xl w-96 whitespace-normal"
-                                    style="display: none;">
-                                    <div class="font-medium mb-2 text-red-400">异常状态 (Unhealthy)</div>
-                                    <div class="leading-relaxed space-y-2">
-                                        <div><strong>触发条件：</strong>连续失败次数≥3次</div>
-                                        <div><strong>状态含义：</strong>服务完全不可用，所有检查均失败</div>
-                                        <div><strong>错误类型及解决方案：</strong>
-                                            <ul class="ml-4 mt-1 space-y-1">
-                                                <li>• <strong>401 未授权：</strong>API密钥无效，请检查密钥配置</li>
-                                                <li>• <strong>403 访问被拒：</strong>API密钥权限不足，请联系服务商</li>
-                                                <li>• <strong>404 不存在：</strong>模型或服务不存在，请检查配置</li>
-                                                <li>• <strong>429 限流：</strong>请求过于频繁，请降低调用频率</li>
-                                                <li>• <strong>500 服务器错误：</strong>服务商内部错误，请稍后重试</li>
-                                                <li>• <strong>503 服务不可用：</strong>服务商维护中，请等待恢复</li>
-                                                <li>• <strong>超时：</strong>网络连接问题，请检查网络或代理设置</li>
-                                            </ul>
-                                        </div>
-                                        <div><strong>影响程度：</strong>服务完全不可用，需要立即处理</div>
-                                        <div><strong>处理建议：</strong>根据错误类型采取相应措施，或切换到其他健康的服务商</div>
-                                    </div>
-                                    <!-- 箭头 -->
-                                    <div
-                                        class="absolute bottom-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-b-4 border-transparent border-b-gray-900">
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- 未知状态 -->
-                            <div class="relative flex items-center gap-1.5">
-                                <div class="w-3 h-3 bg-gray-400 rounded-full"></div>
-                                <button @click="activeTooltip = activeTooltip === 'unknown' ? null : 'unknown'"
-                                    @mouseleave="activeTooltip = null"
-                                    class="flex items-center gap-1 text-sm text-gray-700 hover:text-gray-600 hover:underline cursor-pointer transition-colors">
-                                    <span>未知</span>
-                                    <svg class="w-3 h-3 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
-                                        <path fill-rule="evenodd"
-                                            d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
-                                            clip-rule="evenodd"></path>
-                                    </svg>
-                                </button>
-                                <!-- 未知状态详细说明 -->
-                                <div x-show="activeTooltip === 'unknown'"
-                                    x-transition:enter="transition ease-out duration-200"
-                                    x-transition:enter-start="opacity-0 transform scale-95"
-                                    x-transition:enter-end="opacity-100 transform scale-100"
-                                    x-transition:leave="transition ease-in duration-150"
-                                    x-transition:leave-start="opacity-100 transform scale-100"
-                                    x-transition:leave-end="opacity-0 transform scale-95"
-                                    class="absolute z-50 top-full mt-2 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white text-sm rounded-xl px-4 py-3 shadow-xl w-96 whitespace-normal"
-                                    style="display: none;">
-                                    <div class="font-medium mb-2 text-gray-400">未知状态 (Unknown)</div>
-                                    <div class="leading-relaxed space-y-2">
-                                        <div><strong>触发条件：</strong>健康检查统计数据为空或不存在</div>
-                                        <div><strong>状态含义：</strong>尚未进行健康检查或检查数据不完整</div>
-                                        <div><strong>可能原因：</strong>
-                                            <ul class="ml-4 mt-1 space-y-1">
-                                                <li>• 新创建的服务商分组，尚未执行首次检查</li>
-                                                <li>• 后台健康检查服务未启动或已禁用</li>
-                                                <li>• 数据库中缺少相关统计记录</li>
-                                                <li>• 服务商分组已禁用，跳过健康检查</li>
-                                            </ul>
-                                        </div>
-                                        <div><strong>处理建议：</strong>
-                                            <ul class="ml-4 mt-1 space-y-1">
-                                                <li>• 点击"手动检查"按钮触发立即检查</li>
-                                                <li>• 确认后台健康检查服务已启用</li>
-                                                <li>• 等待下次自动检查（默认30分钟间隔）</li>
-                                                <li>• 检查服务商分组配置是否正确</li>
-                                            </ul>
-                                        </div>
-                                        <div><strong>技术说明：</strong>启动时会延迟1分钟后执行首次检查</div>
-                                    </div>
-                                    <!-- 箭头 -->
-                                    <div
-                                        class="absolute bottom-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-b-4 border-transparent border-b-gray-900">
-                                    </div>
-                                </div>
+                <!-- 服务商健康列表 -->
+                <section class="log-panel mb-4">
+                    <div class="log-panel-head">
+                        <div class="flex flex-wrap items-center gap-2 min-w-0">
+                            <h2 class="log-panel-title">服务商健康状态</h2>
+                            <span class="log-count tabular-nums" x-text="(reportData?.length || 0) + ' 组'"></span>
+                            <div class="hr-legend" x-data="{ tip: null }">
+                                <span class="hr-legend-item" title="连续失败 0 次且至少成功 1 次">
+                                    <i class="hr-dot is-ok"></i>健康
+                                </span>
+                                <span class="hr-legend-item" title="连续失败 1–2 次，间歇性问题">
+                                    <i class="hr-dot is-warn"></i>警告
+                                </span>
+                                <span class="hr-legend-item" title="连续失败 ≥3 次，服务不可用">
+                                    <i class="hr-dot is-bad"></i>异常
+                                </span>
+                                <span class="hr-legend-item" title="尚未检查或数据不完整">
+                                    <i class="hr-dot is-unk"></i>未知
+                                </span>
                             </div>
                         </div>
                     </div>
-                </div>
-            </div>
 
-            <div class="overflow-x-auto">
-                <table class="min-w-full divide-y divide-gray-200">
-                    <thead class="bg-gray-50">
-                        <tr>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                服务商</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                服务商状态</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                密钥状态</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                模型状态</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                最后检查</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                操作</th>
-                        </tr>
-                    </thead>
-                    <tbody class="bg-white divide-y divide-gray-200">
-                        <template x-for="group in reportData" :key="group.group_id">
-                            <tr>
-                                <td class="px-6 py-4 whitespace-nowrap">
-                                    <div class="flex items-center">
-                                        <div>
-                                            <div class="text-sm font-medium text-gray-900" x-text="group.group_name">
+                    <div class="log-table-wrap">
+                        <table class="log-table hr-table">
+                            <thead>
+                                <tr>
+                                    <th>服务商</th>
+                                    <th>服务商状态</th>
+                                    <th>密钥</th>
+                                    <th>模型</th>
+                                    <th>最后检查</th>
+                                    <th class="col-act-wide">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template x-for="group in reportData" :key="group.group_id">
+                                    <tr>
+                                        <td>
+                                            <div class="hr-name" x-text="group.group_name"></div>
+                                            <div class="hr-sub mono" x-text="group.provider_type"></div>
+                                        </td>
+                                        <td>
+                                            <span class="log-badge" :class="getStatusClass(group.provider_health.status)"
+                                                x-text="getStatusText(group.provider_health.status)"></span>
+                                            <div class="hr-sub mono tabular-nums"
+                                                x-text="Math.round(group.provider_health.avg_response_time || 0) + 'ms'"></div>
+                                        </td>
+                                        <td>
+                                            <div class="hr-ratio">
+                                                <span class="is-ok tabular-nums" x-text="group.keys_health.healthy_keys"></span>
+                                                <span class="sep">/</span>
+                                                <span class="tabular-nums" x-text="group.keys_health.total_keys"></span>
                                             </div>
-                                            <div class="text-sm text-gray-500" x-text="group.provider_type"></div>
-                                        </div>
-                                    </div>
-                                </td>
-                                <td class="px-6 py-4 whitespace-nowrap">
-                                    <span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full"
-                                        :class="getStatusClass(group.provider_health.status)"
-                                        x-text="getStatusText(group.provider_health.status)">
-                                    </span>
-                                    <div class="text-xs text-gray-500 mt-1">
-                                        响应时间: <span
-                                            x-text="Math.round(group.provider_health.avg_response_time || 0) + 'ms'"></span>
-                                    </div>
-                                </td>
-                                <td class="px-6 py-4 whitespace-nowrap">
-                                    <div class="text-sm text-gray-900">
-                                        健康: <span class="text-green-600" x-text="group.keys_health.healthy_keys"></span>
-                                        /
-                                        总数: <span x-text="group.keys_health.total_keys"></span>
-                                    </div>
-                                    <div class="text-xs text-gray-500">
-                                        成功率: <span x-text="group.keys_health.avg_success_rate.toFixed(1) + '%'"></span>
-                                    </div>
-                                </td>
-                                <td class="px-6 py-4 whitespace-nowrap">
-                                    <div class="text-sm text-gray-900">
-                                        健康: <span class="text-green-600"
-                                            x-text="group.models_health.healthy_models"></span> /
-                                        总数: <span x-text="group.models_health.total_models"></span>
-                                    </div>
-                                    <div class="text-xs text-gray-500">
-                                        成功率: <span
-                                            x-text="group.models_health.avg_success_rate.toFixed(1) + '%'"></span>
-                                    </div>
-                                </td>
-                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                    <span x-text="formatDateTime(group.provider_health.last_check)"></span>
-                                </td>
-                                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
-                                    <button @click="triggerGroupHealthCheck(group.group_id)"
-                                        :disabled="isGroupCheckInProgress(group.group_id)"
-                                        class="text-purple-600 hover:text-purple-900 disabled:text-purple-300 disabled:cursor-not-allowed">
-                                        <span x-show="!isGroupCheckInProgress(group.group_id)">检查</span>
-                                        <span x-show="isGroupCheckInProgress(group.group_id)">检查中...</span>
-                                    </button>
-                                    <button @click="viewGroupDetails(group.group_id)"
-                                        class="text-blue-600 hover:text-blue-900">查看详情</button>
-                                    <button @click="toggleGroupStatus(group.group_id, group.enabled)"
-                                        :class="group.enabled ? 'text-yellow-600 hover:text-yellow-900' : 'text-green-600 hover:text-green-900'"
-                                        x-text="group.enabled ? '禁用' : '启用'">
-                                    </button>
-                                    <button @click="deleteGroup(group.group_id)"
-                                        class="text-red-600 hover:text-red-900">删除</button>
-                                </td>
-                            </tr>
-                        </template>
-                    </tbody>
-                </table>
-            </div>
-
-            <!-- 空状态 -->
-            <div x-show="reportData.length === 0 && !loading" class="text-center py-12">
-                <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                        d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                <h3 class="mt-2 text-sm font-medium text-gray-900">暂无健康检查数据</h3>
-                <p class="mt-1 text-sm text-gray-500">请先配置服务商分组，然后触发健康检查</p>
-            </div>
-        </div>
-
-        <!-- 分组详情模态框 -->
-        <div x-show="showGroupDetails" x-transition:enter="transition ease-out duration-300"
-            x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
-            x-transition:leave="transition ease-in duration-200" x-transition:leave-start="opacity-100"
-            x-transition:leave-end="opacity-0"
-            class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50" style="display: none;">
-            <div class="relative min-h-screen flex items-center justify-center p-4">
-                <div x-show="showGroupDetails" x-transition:enter="transition ease-out duration-300"
-                    x-transition:enter-start="opacity-0 transform scale-95"
-                    x-transition:enter-end="opacity-100 transform scale-100"
-                    x-transition:leave="transition ease-in duration-200"
-                    x-transition:leave-start="opacity-100 transform scale-100"
-                    x-transition:leave-end="opacity-0 transform scale-95"
-                    class="bg-white/80 backdrop-blur-md rounded-2xl shadow-soft border border-white/50-xl max-w-4xl w-full flex flex-col max-h-[90vh]">
-
-                    <!-- 模态框头部 -->
-                    <div class="flex items-center justify-between p-6 border-b border-gray-200 flex-shrink-0">
-                        <h3 class="text-lg font-medium text-gray-900">
-                            服务商详情 - <span x-text="selectedGroup?.group_name || ''"></span>
-                        </h3>
-                        <button @click="showGroupDetails = false" class="text-gray-400 hover:text-gray-600">
-                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M6 18L18 6M6 6l12 12"></path>
-                            </svg>
-                        </button>
+                                            <div class="hr-sub tabular-nums"
+                                                x-text="(group.keys_health.avg_success_rate || 0).toFixed(1) + '%'"></div>
+                                        </td>
+                                        <td>
+                                            <div class="hr-ratio">
+                                                <span class="is-ok tabular-nums" x-text="group.models_health.healthy_models"></span>
+                                                <span class="sep">/</span>
+                                                <span class="tabular-nums" x-text="group.models_health.total_models"></span>
+                                            </div>
+                                            <div class="hr-sub tabular-nums"
+                                                x-text="(group.models_health.avg_success_rate || 0).toFixed(1) + '%'"></div>
+                                        </td>
+                                        <td class="mono nowrap hr-sub"
+                                            x-text="formatDateTime(group.provider_health.last_check)"></td>
+                                        <td class="col-act-wide">
+                                            <div class="hr-actions">
+                                                <button type="button" @click="triggerGroupHealthCheck(group.group_id)"
+                                                    :disabled="isGroupCheckInProgress(group.group_id)"
+                                                    class="log-link-btn" title="检查此分组">
+                                                    <span x-show="!isGroupCheckInProgress(group.group_id)">检查</span>
+                                                    <span x-show="isGroupCheckInProgress(group.group_id)">…</span>
+                                                </button>
+                                                <button type="button" @click="viewGroupDetails(group.group_id)"
+                                                    class="log-link-btn">详情</button>
+                                                <button type="button" @click="toggleGroupStatus(group.group_id, group.enabled)"
+                                                    class="log-link-btn"
+                                                    :class="group.enabled ? 'is-warn' : 'is-ok'"
+                                                    x-text="group.enabled ? '禁用' : '启用'"></button>
+                                                <button type="button" @click="deleteGroup(group.group_id)"
+                                                    class="log-link-btn is-bad">删除</button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                </template>
+                                <tr x-show="reportData.length === 0 && !loading">
+                                    <td colspan="6" class="log-empty-cell">
+                                        暂无健康检查数据，请先配置服务商并触发检查
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
                     </div>
+                </section>
 
-                    <!-- 模态框内容 -->
-                    <div class="flex-1 overflow-y-auto p-6" x-show="selectedGroup">
-                        <!-- 基本信息 -->
-                        <div class="mb-6">
-                            <h4 class="text-md font-medium text-gray-900 mb-3">基本信息</h4>
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div class="bg-gray-50 p-3 rounded">
-                                    <dt class="text-sm font-medium text-gray-500">分组名称</dt>
-                                    <dd class="text-sm text-gray-900" x-text="selectedGroup?.group_name"></dd>
-                                </div>
-                                <div class="bg-gray-50 p-3 rounded">
-                                    <dt class="text-sm font-medium text-gray-500">服务商类型</dt>
-                                    <dd class="text-sm text-gray-900" x-text="selectedGroup?.provider_type"></dd>
-                                </div>
-                                <div class="bg-gray-50 p-3 rounded">
-                                    <dt class="text-sm font-medium text-gray-500">状态</dt>
-                                    <dd>
-                                        <span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full"
-                                            :class="getStatusClass(selectedGroup?.provider_health?.status)"
-                                            x-text="getStatusText(selectedGroup?.provider_health?.status)">
-                                        </span>
-                                    </dd>
-                                </div>
-                                <div class="bg-gray-50 p-3 rounded">
-                                    <dt class="text-sm font-medium text-gray-500">最后检查时间</dt>
-                                    <dd class="text-sm text-gray-900"
-                                        x-text="formatDateTime(selectedGroup?.provider_health?.last_check)"></dd>
-                                </div>
-                                <div class="bg-gray-50 p-3 rounded md:col-span-2" x-show="selectedGroup?.provider_health?.error_message">
-                                    <dt class="text-sm font-medium text-gray-500">错误信息</dt>
-                                    <dd class="text-sm text-red-600 break-all" x-text="selectedGroup?.provider_health?.error_message || '-'"></dd>
-                                </div>
+                <!-- 分组详情弹窗 -->
+                <div x-show="showGroupDetails" x-cloak class="gf-overlay" style="display:none"
+                    @keydown.escape.window="showGroupDetails = false">
+                    <div class="gf-modal hr-detail-modal" @click.stop role="dialog" aria-modal="true">
+                        <header class="gf-header">
+                            <div class="min-w-0">
+                                <h3 class="gf-title">
+                                    服务商详情
+                                    <span class="gf-id-tag" x-text="selectedGroup?.group_name || ''"></span>
+                                </h3>
+                                <p class="gf-sub">
+                                    <span x-text="selectedGroup?.provider_type || ''"></span>
+                                    <span class="dash-sep">·</span>
+                                    <span class="log-badge" :class="getStatusClass(selectedGroup?.provider_health?.status)"
+                                        x-text="getStatusText(selectedGroup?.provider_health?.status)"></span>
+                                    <span class="dash-sep">·</span>
+                                    <span x-text="'检查 ' + formatDateTime(selectedGroup?.provider_health?.last_check)"></span>
+                                </p>
                             </div>
-                        </div>
+                            <button type="button" @click="showGroupDetails = false" class="gf-close" aria-label="关闭">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+                            </button>
+                        </header>
 
-                        <!-- 密钥状态 -->
-                        <div class="mb-6" x-show="selectedGroup?.keys && selectedGroup.keys.length > 0">
-                            <h4 class="text-md font-medium text-gray-900 mb-3">
-                                密钥状态
-                                <span class="text-sm text-gray-500">
-                                    (健康: <span x-text="selectedGroup?.keys_health?.healthy_keys || 0"></span> /
-                                    总数: <span x-text="selectedGroup?.keys_health?.total_keys || 0"></span>)
-                                </span>
-                            </h4>
-                            <div class="overflow-hidden">
-                                <table class="w-full divide-y divide-gray-200 table-fixed">
-                                    <thead class="bg-gray-50">
-                                        <tr>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap w-1/4">
-                                                密钥</th>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap w-16">
-                                                状态</th>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap w-16">
-                                                成功率</th>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap w-20">
-                                                响应时间</th>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap w-32">
-                                                最后检查</th>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap w-1/4">
-                                                错误信息</th>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap w-16">
-                                                操作</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody class="bg-white divide-y divide-gray-200">
-                                        <template x-for="key in selectedGroup?.keys || []" :key="key.key_id">
+                        <div class="gf-body">
+                            <div x-show="selectedGroup?.provider_health?.error_message" class="hr-error-banner mb-3">
+                                <strong>错误</strong>
+                                <span x-text="selectedGroup?.provider_health?.error_message"></span>
+                            </div>
+
+                            <!-- 密钥 -->
+                            <div class="mb-4" x-show="selectedGroup?.keys && selectedGroup.keys.length > 0">
+                                <div class="gf-toolbar">
+                                    <span class="gf-section-title">密钥状态</span>
+                                    <span class="gf-muted tabular-nums"
+                                        x-text="(selectedGroup?.keys_health?.healthy_keys || 0) + ' / ' + (selectedGroup?.keys_health?.total_keys || 0) + ' 健康'"></span>
+                                </div>
+                                <div class="log-table-wrap hr-inner-table">
+                                    <table class="log-table">
+                                        <thead>
                                             <tr>
-                                                <td class="px-4 py-2 text-sm font-mono text-gray-900 whitespace-nowrap w-1/4">
-                                                    <div class="truncate" :title="key.masked_key || key.api_key">
-                                                        <span x-text="key.masked_key || key.api_key?.substring(0, 20) + '...'"></span>
-                                                    </div>
-                                                </td>
-                                                <td class="px-4 py-2 whitespace-nowrap w-16">
-                                                    <span
-                                                        class="inline-flex px-2 py-1 text-xs font-semibold rounded-full"
-                                                        :class="getStatusClass(key.health_status)"
-                                                        x-text="getStatusText(key.health_status)">
-                                                    </span>
-                                                </td>
-                                                <td class="px-4 py-2 text-sm text-gray-900 whitespace-nowrap w-16">
-                                                    <span x-text="(key.success_rate || 0).toFixed(1) + '%'"></span>
-                                                </td>
-                                                <td class="px-4 py-2 text-sm text-gray-900 whitespace-nowrap w-20">
-                                                    <span x-text="Math.round(key.avg_response_time || 0) + 'ms'"></span>
-                                                </td>
-                                                <td class="px-4 py-2 text-sm text-gray-500 whitespace-nowrap w-32">
-                                                    <span x-text="formatDateTime(key.last_check)"></span>
-                                                </td>
-                                                <td class="px-4 py-2 text-sm text-red-600 whitespace-nowrap w-1/4">
-                                                    <div class="truncate" :title="key.error_message || '-'">
-                                                        <span x-text="key.error_message || '-'"></span>
-                                                    </div>
-                                                </td>
-                                                <td class="px-4 py-2 whitespace-nowrap w-16">
-                                                    <button
-                                                        @click="deleteApiKey(selectedGroupId, key.api_key || key.masked_key)"
-                                                        class="text-red-600 hover:text-red-800 text-sm font-medium px-2 py-1 rounded hover:bg-red-50"
-                                                        title="删除此密钥">
-                                                        删除
-                                                    </button>
-                                                </td>
+                                                <th>密钥</th>
+                                                <th>状态</th>
+                                                <th>成功率</th>
+                                                <th>耗时</th>
+                                                <th>最后检查</th>
+                                                <th>错误</th>
+                                                <th class="col-act">操作</th>
                                             </tr>
-                                        </template>
-                                    </tbody>
-                                </table>
+                                        </thead>
+                                        <tbody>
+                                            <template x-for="key in selectedGroup?.keys || []" :key="key.key_id">
+                                                <tr>
+                                                    <td class="mono truncate" :title="key.masked_key || key.api_key"
+                                                        x-text="key.masked_key || (key.api_key ? key.api_key.substring(0, 20) + '…' : '—')"></td>
+                                                    <td><span class="log-badge" :class="getStatusClass(key.health_status)"
+                                                        x-text="getStatusText(key.health_status)"></span></td>
+                                                    <td class="mono tabular-nums" x-text="(key.success_rate || 0).toFixed(1) + '%'"></td>
+                                                    <td class="mono tabular-nums" x-text="Math.round(key.avg_response_time || 0) + 'ms'"></td>
+                                                    <td class="mono nowrap hr-sub" x-text="formatDateTime(key.last_check)"></td>
+                                                    <td class="err-cell truncate" :title="key.error_message || ''"
+                                                        x-text="key.error_message || '—'"></td>
+                                                    <td class="col-act">
+                                                        <button type="button"
+                                                            @click="deleteApiKey(selectedGroupId, key.api_key || key.masked_key)"
+                                                            class="log-link-btn is-bad">删除</button>
+                                                    </td>
+                                                </tr>
+                                            </template>
+                                        </tbody>
+                                    </table>
+                                </div>
                             </div>
-                        </div>
 
-                        <!-- 模型状态 -->
-                        <div class="mb-6" x-show="selectedGroup?.models && selectedGroup.models.length > 0">
-                            <h4 class="text-md font-medium text-gray-900 mb-3">
-                                模型状态
-                                <span class="text-sm text-gray-500">
-                                    (健康: <span x-text="selectedGroup?.models_health?.healthy_models || 0"></span> /
-                                    总数: <span x-text="selectedGroup?.models_health?.total_models || 0"></span>)
-                                </span>
-                            </h4>
-                            <div class="overflow-hidden">
-                                <table class="w-full divide-y divide-gray-200 table-fixed">
-                                    <thead class="bg-gray-50">
-                                        <tr>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap w-1/4">
-                                                模型名称</th>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap w-16">
-                                                状态</th>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap w-16">
-                                                成功率</th>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap w-20">
-                                                响应时间</th>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap w-32">
-                                                最后检查</th>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap w-1/4">
-                                                错误信息</th>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap w-16">
-                                                操作</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody class="bg-white divide-y divide-gray-200">
-                                        <template x-for="model in selectedGroup?.models || []" :key="model.model_name">
+                            <!-- 模型 -->
+                            <div class="mb-4" x-show="selectedGroup?.models && selectedGroup.models.length > 0">
+                                <div class="gf-toolbar">
+                                    <span class="gf-section-title">模型状态</span>
+                                    <span class="gf-muted tabular-nums"
+                                        x-text="(selectedGroup?.models_health?.healthy_models || 0) + ' / ' + (selectedGroup?.models_health?.total_models || 0) + ' 健康'"></span>
+                                </div>
+                                <div class="log-table-wrap hr-inner-table">
+                                    <table class="log-table">
+                                        <thead>
                                             <tr>
-                                                <td class="px-4 py-2 text-sm font-medium text-gray-900 whitespace-nowrap w-1/4">
-                                                    <div class="truncate" :title="model.model_name">
-                                                        <span x-text="model.model_name"></span>
-                                                    </div>
-                                                </td>
-                                                <td class="px-4 py-2 whitespace-nowrap w-16">
-                                                    <span
-                                                        class="inline-flex px-2 py-1 text-xs font-semibold rounded-full"
-                                                        :class="getStatusClass(model.health_status)"
-                                                        x-text="getStatusText(model.health_status)">
-                                                    </span>
-                                                </td>
-                                                <td class="px-4 py-2 text-sm text-gray-900 whitespace-nowrap w-16">
-                                                    <span x-text="(model.success_rate || 0).toFixed(1) + '%'"></span>
-                                                </td>
-                                                <td class="px-4 py-2 text-sm text-gray-900 whitespace-nowrap w-20">
-                                                    <span x-text="Math.round(model.avg_response_time || 0) + 'ms'"></span>
-                                                </td>
-                                                <td class="px-4 py-2 text-sm text-gray-500 whitespace-nowrap w-32">
-                                                    <span x-text="formatDateTime(model.last_check)"></span>
-                                                </td>
-                                                <td class="px-4 py-2 text-sm text-red-600 whitespace-nowrap w-1/4">
-                                                    <div class="truncate" :title="model.error_message || '-'">
-                                                        <span x-text="model.error_message || '-'"></span>
-                                                    </div>
-                                                </td>
-                                                <td class="px-4 py-2 whitespace-nowrap w-16">
-                                                    <button
-                                                        @click="deleteModel(selectedGroupId, model.model_name)"
-                                                        class="text-red-600 hover:text-red-800 text-sm font-medium px-2 py-1 rounded hover:bg-red-50"
-                                                        title="删除此模型">
-                                                        删除
-                                                    </button>
-                                                </td>
+                                                <th>模型</th>
+                                                <th>状态</th>
+                                                <th>成功率</th>
+                                                <th>耗时</th>
+                                                <th>最后检查</th>
+                                                <th>错误</th>
+                                                <th class="col-act">操作</th>
                                             </tr>
-                                        </template>
-                                    </tbody>
-                                </table>
+                                        </thead>
+                                        <tbody>
+                                            <template x-for="model in selectedGroup?.models || []" :key="model.model_name">
+                                                <tr>
+                                                    <td class="mono truncate" :title="model.model_name" x-text="model.model_name"></td>
+                                                    <td><span class="log-badge" :class="getStatusClass(model.health_status)"
+                                                        x-text="getStatusText(model.health_status)"></span></td>
+                                                    <td class="mono tabular-nums" x-text="(model.success_rate || 0).toFixed(1) + '%'"></td>
+                                                    <td class="mono tabular-nums" x-text="Math.round(model.avg_response_time || 0) + 'ms'"></td>
+                                                    <td class="mono nowrap hr-sub" x-text="formatDateTime(model.last_check)"></td>
+                                                    <td class="err-cell truncate" :title="model.error_message || ''"
+                                                        x-text="model.error_message || '—'"></td>
+                                                    <td class="col-act">
+                                                        <button type="button"
+                                                            @click="deleteModel(selectedGroupId, model.model_name)"
+                                                            class="log-link-btn is-bad">删除</button>
+                                                    </td>
+                                                </tr>
+                                            </template>
+                                        </tbody>
+                                    </table>
+                                </div>
                             </div>
-                        </div>
 
-                        <!-- 最近的健康检查历史 -->
-                        <div x-show="selectedGroup?.recent_checks && selectedGroup.recent_checks.length > 0">
-                            <h4 class="text-md font-medium text-gray-900 mb-3">最近检查历史</h4>
-                            <div class="overflow-x-auto">
-                                <table class="min-w-full divide-y divide-gray-200">
-                                    <thead class="bg-gray-50">
-                                        <tr>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                                                检查时间</th>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                                                检查类型</th>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                                                状态</th>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                                                响应时间</th>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                                                错误信息</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody class="bg-white divide-y divide-gray-200">
-                                        <template x-for="check in selectedGroup?.recent_checks || []" :key="check.id">
+                            <!-- 历史 -->
+                            <div x-show="selectedGroup?.recent_checks && selectedGroup.recent_checks.length > 0">
+                                <div class="gf-toolbar">
+                                    <span class="gf-section-title">最近检查历史</span>
+                                </div>
+                                <div class="log-table-wrap hr-inner-table">
+                                    <table class="log-table">
+                                        <thead>
                                             <tr>
-                                                <td class="px-4 py-2 text-sm text-gray-900">
-                                                    <span x-text="formatDateTime(check.checked_at)"></span>
-                                                </td>
-                                                <td class="px-4 py-2 text-sm text-gray-900">
-                                                    <span x-text="check.check_type"></span>
-                                                </td>
-                                                <td class="px-4 py-2">
-                                                    <span
-                                                        class="inline-flex px-2 py-1 text-xs font-semibold rounded-full"
-                                                        :class="check.is_success ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'"
-                                                        x-text="check.is_success ? '成功' : '失败'">
-                                                    </span>
-                                                </td>
-                                                <td class="px-4 py-2 text-sm text-gray-900">
-                                                    <span x-text="Math.round(check.response_time || 0) + 'ms'"></span>
-                                                </td>
-                                                <td class="px-4 py-2 text-sm text-gray-500">
-                                                    <span x-text="check.error_message || '-'"></span>
-                                                </td>
+                                                <th>时间</th>
+                                                <th>类型</th>
+                                                <th>状态</th>
+                                                <th>耗时</th>
+                                                <th>错误</th>
                                             </tr>
-                                        </template>
-                                    </tbody>
-                                </table>
+                                        </thead>
+                                        <tbody>
+                                            <template x-for="check in selectedGroup?.recent_checks || []" :key="check.id">
+                                                <tr>
+                                                    <td class="mono nowrap" x-text="formatDateTime(check.checked_at)"></td>
+                                                    <td x-text="check.check_type"></td>
+                                                    <td>
+                                                        <span class="log-badge"
+                                                            :class="check.is_success ? 'log-badge-ok' : 'log-badge-bad'"
+                                                            x-text="check.is_success ? '成功' : '失败'"></span>
+                                                    </td>
+                                                    <td class="mono tabular-nums" x-text="Math.round(check.response_time || 0) + 'ms'"></td>
+                                                    <td class="err-cell truncate" :title="check.error_message || ''"
+                                                        x-text="check.error_message || '—'"></td>
+                                                </tr>
+                                            </template>
+                                        </tbody>
+                                    </table>
+                                </div>
                             </div>
                         </div>
-                    </div>
 
-                    <!-- 模态框底部 -->
-                    <div class="px-6 py-4 border-t border-gray-200 flex justify-end flex-shrink-0">
-                        <button @click="showGroupDetails = false"
-                            class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-xl transition-colors">
-                            关闭
-                        </button>
+                        <footer class="gf-footer">
+                            <div class="gf-footer-hint">密钥 / 模型 / 历史检查明细</div>
+                            <div class="gf-footer-actions">
+                                <button type="button" @click="showGroupDetails = false" class="btn btn-secondary btn-sm">关闭</button>
+                            </div>
+                        </footer>
                     </div>
                 </div>
-            </div>
-        </div>
 
-        <!-- 加载状态 -->
-        <div x-show="loading"
-            class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full flex items-center justify-center">
-            <div class="bg-white p-8 rounded-xl shadow-lg">
-                <div class="flex items-center space-x-4">
-                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                    <span class="text-lg font-medium text-gray-900">加载健康检查数据...</span>
+                <!-- 加载遮罩 -->
+                <div x-show="loading" class="hr-loading-mask" style="display:none">
+                    <div class="hr-loading-card">
+                        <svg class="animate-spin" width="22" height="22" viewBox="0 0 24 24" fill="none">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                        </svg>
+                        <span>加载健康检查数据…</span>
+                    </div>
                 </div>
-            </div>
-        </div>
 
         <!-- 确认提示框模态框 -->
         <div id="confirmModal" class="modal-overlay fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50 hidden">
@@ -844,11 +425,16 @@
                 </div>
             </div>
         </div>
-    </div>
 
     <!-- 引入模态框组件 -->
+
+            </main>
+        </div>
+    </div><!-- /.app-shell -->
+
     <script src="js/modal-components.js"></script>
     <script src="js/health-report.js"></script>
+    <script>AppShell.init("health-report");</script>
 </body>
 
 </html>

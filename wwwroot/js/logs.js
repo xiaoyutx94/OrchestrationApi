@@ -189,6 +189,7 @@ function logsManagement() {
         nextUpdateCountdown: 30,
         countdownInterval: null,
         chartTimeRange: '',
+        chartsCollapsed: true, // 默认折叠图表，优先展示列表
         chartsLoading: {
             status: false,
             model: false,
@@ -210,10 +211,28 @@ function logsManagement() {
             await this.loadLogs();
             await this.loadStats();
             await this.loadTokenStats();
-            // 延迟初始化图表，确保数据已加载和DOM已渲染
-            setTimeout(() => {
-                this.initCharts();
-            }, 500);
+            // 图表默认折叠，展开时再初始化（避免 display:none 下 canvas 尺寸为 0）
+            if (!this.chartsCollapsed) {
+                setTimeout(() => this.initCharts(), 500);
+            }
+        },
+
+        toggleCharts() {
+            this.chartsCollapsed = !this.chartsCollapsed;
+            if (this.chartsCollapsed) return;
+            this.$nextTick(() => {
+                setTimeout(() => {
+                    const hasChart = this.chartInstances && this.chartInstances.status;
+                    if (!hasChart) {
+                        this.initCharts();
+                    } else {
+                        Object.values(this.chartInstances).forEach((chart) => {
+                            try { chart && chart.resize && chart.resize(); } catch (e) { /* ignore */ }
+                        });
+                        this.updateCharts && this.updateCharts();
+                    }
+                }, 80);
+            });
         },
 
         get totalPages() {
@@ -316,10 +335,12 @@ function logsManagement() {
             this.currentPage = 1;
             await this.loadLogs();
             await this.loadStats();
-            // 筛选条件变化时也需要更新图表
-            setTimeout(async () => {
-                await this.updateCharts();
-            }, 300);
+            // 折叠态不建图，避免 display:none 下 canvas 尺寸为 0
+            if (!this.chartsCollapsed) {
+                setTimeout(async () => {
+                    await this.updateCharts();
+                }, 300);
+            }
         },
 
         async viewLogDetail(id) {
@@ -342,10 +363,12 @@ function logsManagement() {
             await this.loadLogs();
             await this.loadStats();
             //await this.loadTokenStats();
-            // 延迟更新图表，确保数据已加载
-            setTimeout(() => {
-                this.updateCharts();
-            }, 300);
+            // 折叠态不建图；展开后再由 toggleCharts / updateCharts 处理
+            if (!this.chartsCollapsed) {
+                setTimeout(() => {
+                    this.updateCharts();
+                }, 300);
+            }
         },
 
         async loadTokenStats() {
@@ -757,6 +780,10 @@ function logsManagement() {
         },
 
         updateCharts() {
+            // 折叠时跳过，防止在隐藏 canvas 上初始化 Chart.js
+            if (this.chartsCollapsed) {
+                return;
+            }
             // 销毁现有图表实例
             this.destroyCharts();
             // 重新创建图表

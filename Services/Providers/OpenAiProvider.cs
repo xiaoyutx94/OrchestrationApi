@@ -3,6 +3,7 @@ using System.Text;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using OrchestrationApi.Services.Core;
+using OrchestrationApi.Utils;
 using System.Net;
 using System.Diagnostics;
 
@@ -233,17 +234,25 @@ public class OpenAiProvider : ILLMProvider
 
                 if (useFakeStreaming)
                 {
-                    // 假流模式：将非流式响应转换为流式格式
-                    var nonStreamingContent = await response.Content.ReadAsStringAsync();
-                    responseStream = ConvertToFakeStream(nonStreamingContent);
+                    // 假流模式：将非流式响应转换为流式格式（读完即可释放 response）
+                    try
+                    {
+                        var nonStreamingContent = await response.Content.ReadAsStringAsync(combinedCts.Token);
+                        responseStream = ConvertToFakeStream(nonStreamingContent);
 
-                    _logger.LogDebug("OpenAI 假流转换完成，原始响应长度: {ContentLength}, 分组: {GroupId}({GroupName})",
-                        nonStreamingContent?.Length ?? 0, config.GroupId ?? "未知", config.GroupName ?? "未知");
+                        _logger.LogDebug("OpenAI 假流转换完成，原始响应长度: {ContentLength}, 分组: {GroupId}({GroupName})",
+                            nonStreamingContent?.Length ?? 0, config.GroupId ?? "未知", config.GroupName ?? "未知");
+                    }
+                    finally
+                    {
+                        response.Dispose();
+                    }
                 }
                 else
                 {
-                    // 正常模式：直接返回响应流
-                    responseStream = await response.Content.ReadAsStreamAsync();
+                    // 正常模式：返回流时由包装类在 Dispose 时释放 HttpResponseMessage
+                    var innerStream = await response.Content.ReadAsStreamAsync(combinedCts.Token);
+                    responseStream = new HttpResponseMessageStream(response, innerStream);
                 }
 
                 return new ProviderHttpResponse
@@ -256,7 +265,15 @@ public class OpenAiProvider : ILLMProvider
             }
             else
             {
-                var errorContent = await response.Content.ReadAsStringAsync();
+                string errorContent;
+                try
+                {
+                    errorContent = await response.Content.ReadAsStringAsync(combinedCts.Token);
+                }
+                finally
+                {
+                    response.Dispose();
+                }
                 var (shouldRetry, shouldTryNextKey, errorMessage) = CheckErrorResponse(statusCode, errorContent);
 
                 _logger.LogWarning("OpenAI HTTP请求失败，状态码: {StatusCode}, 耗时: {ElapsedMs}ms, API密钥: {ApiKey}, 错误: {Error}, 分组: {GroupId}({GroupName})",

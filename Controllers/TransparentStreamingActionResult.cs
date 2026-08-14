@@ -44,10 +44,17 @@ public class TransparentStreamingActionResult : IActionResult
         if (!response.Headers.ContainsKey("Connection"))
             response.Headers["Connection"] = "keep-alive";
 
+        var abortToken = context.HttpContext.RequestAborted;
         try
         {
-            // 直接将Provider的响应流透明地复制到客户端
-            await _responseStream.CopyToAsync(response.Body);
+            // 客户端断开时取消复制，避免继续消费上游 token/连接
+            await _responseStream.CopyToAsync(response.Body, abortToken);
+        }
+        catch (OperationCanceledException) when (abortToken.IsCancellationRequested)
+        {
+            var logger = context.HttpContext.RequestServices
+                .GetService<ILogger<TransparentStreamingActionResult>>();
+            logger?.LogDebug("客户端已断开，停止透明流式复制");
         }
         catch (Exception ex)
         {
@@ -59,7 +66,10 @@ public class TransparentStreamingActionResult : IActionResult
         }
         finally
         {
-            _responseStream?.Dispose();
+            if (_responseStream != null)
+            {
+                await _responseStream.DisposeAsync();
+            }
         }
     }
 }

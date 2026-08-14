@@ -1,3 +1,9 @@
+// 统一清理认证本地存储（含用户名展示）
+function clearAuthStorage() {
+    localStorage.removeItem('authToken');
+    localStorage.removeItem('tokenExpires');
+    localStorage.removeItem('username');
+}
 // 健康检查报表页面逻辑
 function healthReportDashboard() {
     return {
@@ -52,20 +58,17 @@ function healthReportDashboard() {
                         return true;
                     } else {
                         console.warn('Token无效:', data.message);
-                        localStorage.removeItem('authToken');
-                        localStorage.removeItem('tokenExpires');
+                        clearAuthStorage();
                         return false;
                     }
                 } else {
                     console.warn('认证验证失败:', response.status, response.statusText);
-                    localStorage.removeItem('authToken');
-                    localStorage.removeItem('tokenExpires');
+                    clearAuthStorage();
                     return false;
                 }
             } catch (error) {
                 console.error('认证检查时发生错误:', error);
-                localStorage.removeItem('authToken');
-                localStorage.removeItem('tokenExpires');
+                clearAuthStorage();
                 return false;
             }
         },
@@ -92,8 +95,7 @@ function healthReportDashboard() {
                     }
                 } else if (response.status === 401) {
                     console.warn('认证失败，跳转到登录页面');
-                    localStorage.removeItem('authToken');
-                    localStorage.removeItem('tokenExpires');
+                    clearAuthStorage();
                     window.location.href = '/login';
                     return;
                 } else {
@@ -125,8 +127,7 @@ function healthReportDashboard() {
                     }
                 } else if (response.status === 401) {
                     console.warn('认证失败，跳转到登录页面');
-                    localStorage.removeItem('authToken');
-                    localStorage.removeItem('tokenExpires');
+                    clearAuthStorage();
                     window.location.href = '/login';
                     return;
                 }
@@ -172,8 +173,7 @@ function healthReportDashboard() {
                     }
                 } else if (response.status === 401) {
                     console.warn('认证失败，跳转到登录页面');
-                    localStorage.removeItem('authToken');
-                    localStorage.removeItem('tokenExpires');
+                    clearAuthStorage();
                     window.location.href = '/login';
                     return;
                 } else {
@@ -220,8 +220,7 @@ function healthReportDashboard() {
                     }
                 } else if (response.status === 401) {
                     console.warn('认证失败，跳转到登录页面');
-                    localStorage.removeItem('authToken');
-                    localStorage.removeItem('tokenExpires');
+                    clearAuthStorage();
                     window.location.href = '/login';
                     return;
                 } else {
@@ -260,8 +259,7 @@ function healthReportDashboard() {
                     }
                 } else if (response.status === 401) {
                     console.warn('认证失败，跳转到登录页面');
-                    localStorage.removeItem('authToken');
-                    localStorage.removeItem('tokenExpires');
+                    clearAuthStorage();
                     window.location.href = '/login';
                     return;
                 } else {
@@ -300,8 +298,7 @@ function healthReportDashboard() {
                     }
                 } else if (response.status === 401) {
                     console.warn('认证失败，跳转到登录页面');
-                    localStorage.removeItem('authToken');
-                    localStorage.removeItem('tokenExpires');
+                    clearAuthStorage();
                     window.location.href = '/login';
                     return;
                 } else {
@@ -338,8 +335,7 @@ function healthReportDashboard() {
                     }
                 } else if (response.status === 401) {
                     console.warn('认证失败，跳转到登录页面');
-                    localStorage.removeItem('authToken');
-                    localStorage.removeItem('tokenExpires');
+                    clearAuthStorage();
                     window.location.href = '/login';
                     return;
                 } else {
@@ -354,13 +350,13 @@ function healthReportDashboard() {
         getStatusClass(status) {
             switch (status) {
                 case 'healthy':
-                    return 'bg-green-100 text-green-800';
+                    return 'log-badge-ok';
                 case 'warning':
-                    return 'bg-yellow-100 text-yellow-800';
+                    return 'log-badge-warn';
                 case 'unhealthy':
-                    return 'bg-red-100 text-red-800';
+                    return 'log-badge-bad';
                 default:
-                    return 'bg-gray-100 text-gray-800';
+                    return 'log-badge-muted';
             }
         },
 

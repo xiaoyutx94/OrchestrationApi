@@ -2,6 +2,7 @@ using OrchestrationApi.Models;
 using System.Text;
 using Newtonsoft.Json;
 using OrchestrationApi.Services.Core;
+using OrchestrationApi.Utils;
 using Microsoft.Extensions.Configuration;
 using System.Diagnostics;
 
@@ -12,7 +13,7 @@ namespace OrchestrationApi.Services.Providers;
 /// </summary>
 public class GeminiProvider : ILLMProvider
 {
-    private readonly HttpClient _httpClient;
+    private readonly IProxyHttpClientService _proxyHttpClientService;
     private readonly ILogger<GeminiProvider> _logger;
     private readonly IConfiguration _configuration;
 
@@ -21,11 +22,11 @@ public class GeminiProvider : ILLMProvider
     public bool SupportsTools => true;
 
     public GeminiProvider(
-        HttpClient httpClient,
+        IProxyHttpClientService proxyHttpClientService,
         ILogger<GeminiProvider> logger,
         IConfiguration configuration)
     {
-        _httpClient = httpClient;
+        _proxyHttpClientService = proxyHttpClientService;
         _logger = logger;
         _configuration = configuration;
     }
@@ -163,8 +164,12 @@ public class GeminiProvider : ILLMProvider
             // 开始计时
             var stopwatch = Stopwatch.StartNew();
 
+            // 与 OpenAI/Anthropic 一致：走代理 HttpClient
+            var proxyConfiguration = ConvertToProxyConfiguration(config.ProxyConfig);
+            var httpClient = _proxyHttpClientService.CreateHttpClient(proxyConfiguration, connectionTimeoutSeconds);
+
             // 发送请求
-            var response = await _httpClient.SendAsync(request,
+            var response = await httpClient.SendAsync(request,
                 isStreaming ? HttpCompletionOption.ResponseHeadersRead : HttpCompletionOption.ResponseContentRead,
                 combinedCts.Token);
 
@@ -189,12 +194,14 @@ public class GeminiProvider : ILLMProvider
                 _logger.LogDebug("Gemini HTTP请求成功，状态码: {StatusCode}, 耗时: {ElapsedMs}ms, API密钥: {ApiKey}, 流式: {IsStreaming}, 分组: {GroupId}({GroupName})",
                     statusCode, elapsedMs, MaskApiKey(apiKey), isStreaming, config.GroupId ?? "未知", config.GroupName ?? "未知");
 
-                var responseStream = await response.Content.ReadAsStreamAsync();
+                var ownedStream = new HttpResponseMessageStream(
+                    response,
+                    await response.Content.ReadAsStreamAsync(combinedCts.Token));
 
-                // 对于流式响应，创建验证包装流
+                // 对于流式响应，创建验证包装流（dispose 时仍会落到 ownedStream → response）
                 if (isStreaming)
                 {
-                    var validatedStream = new GeminiStreamValidationWrapper(responseStream, _logger, apiKey, config, _configuration);
+                    var validatedStream = new GeminiStreamValidationWrapper(ownedStream, _logger, apiKey, config, _configuration);
                     return new ProviderHttpResponse
                     {
                         StatusCode = statusCode,
@@ -208,13 +215,21 @@ public class GeminiProvider : ILLMProvider
                 {
                     StatusCode = statusCode,
                     IsSuccess = true,
-                    ResponseStream = responseStream,
+                    ResponseStream = ownedStream,
                     Headers = responseHeaders
                 };
             }
             else
             {
-                var errorContent = await response.Content.ReadAsStringAsync();
+                string errorContent;
+                try
+                {
+                    errorContent = await response.Content.ReadAsStringAsync(combinedCts.Token);
+                }
+                finally
+                {
+                    response.Dispose();
+                }
                 var (shouldRetry, shouldTryNextKey, errorMessage) = CheckErrorResponse(statusCode, errorContent);
 
                 _logger.LogWarning("Gemini HTTP请求失败，状态码: {StatusCode}, 耗时: {ElapsedMs}ms, API密钥: {ApiKey}, 错误: {Error}, 分组: {GroupId}({GroupName})",
@@ -327,17 +342,21 @@ public class GeminiProvider : ILLMProvider
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 cts.CancelAfter(TimeSpan.FromSeconds(config.TimeoutSeconds));
 
-                var response = await _httpClient.SendAsync(request, cts.Token);
+                var proxyConfiguration = ConvertToProxyConfiguration(config.ProxyConfig);
+                var httpClient = _proxyHttpClientService.CreateHttpClient(
+                    proxyConfiguration,
+                    Math.Max(config.ConnectionTimeoutSeconds, 30));
+                using var response = await httpClient.SendAsync(request, cts.Token);
 
                 if (response.IsSuccessStatusCode)
                 {
-                    var content = await response.Content.ReadAsStringAsync();
+                    var content = await response.Content.ReadAsStringAsync(cts.Token);
                     var geminiResponse = JsonConvert.DeserializeObject<GeminiModelsResponse>(content);
 
                     return ConvertToModelsResponse(geminiResponse);
                 }
 
-                var errorContent = await response.Content.ReadAsStringAsync();
+                var errorContent = await response.Content.ReadAsStringAsync(cts.Token);
                 var (_, shouldTryNextKey, _) = CheckErrorResponse((int)response.StatusCode, errorContent);
 
                 if (shouldTryNextKey)
@@ -396,11 +415,15 @@ public class GeminiProvider : ILLMProvider
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 cts.CancelAfter(TimeSpan.FromSeconds(config.TimeoutSeconds));
 
-                var response = await _httpClient.SendAsync(request, cts.Token);
+                var proxyConfiguration = ConvertToProxyConfiguration(config.ProxyConfig);
+                var httpClient = _proxyHttpClientService.CreateHttpClient(
+                    proxyConfiguration,
+                    Math.Max(config.ConnectionTimeoutSeconds, 30));
+                using var response = await httpClient.SendAsync(request, cts.Token);
 
                 if (response.IsSuccessStatusCode)
                 {
-                    var content = await response.Content.ReadAsStringAsync();
+                    var content = await response.Content.ReadAsStringAsync(cts.Token);
                     var geminiResponse = JsonConvert.DeserializeObject<GeminiNativeModelsResponse>(content);
 
                     return geminiResponse ?? new GeminiNativeModelsResponse();
@@ -461,6 +484,28 @@ public class GeminiProvider : ILLMProvider
             return "***";
 
         return apiKey.Substring(0, 4) + "***" + apiKey.Substring(apiKey.Length - 4);
+    }
+
+    /// <summary>
+    /// 将ProxyConfig转换为ProxyConfiguration
+    /// </summary>
+    private ProxyConfiguration? ConvertToProxyConfiguration(ProxyConfig? proxyConfig)
+    {
+        if (proxyConfig == null || string.IsNullOrEmpty(proxyConfig.Host))
+        {
+            return null;
+        }
+
+        return new ProxyConfiguration
+        {
+            Type = proxyConfig.Type,
+            Host = proxyConfig.Host,
+            Port = proxyConfig.Port,
+            Username = proxyConfig.Username ?? "",
+            Password = proxyConfig.Password ?? "",
+            BypassLocal = proxyConfig.BypassLocal,
+            BypassDomains = proxyConfig.BypassDomains ?? new List<string>()
+        };
     }
 
     /// <summary>

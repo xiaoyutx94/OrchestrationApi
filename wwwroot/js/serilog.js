@@ -30,6 +30,7 @@ function serilogManagement() {
         showDetailModal: false,
         showCleanupModal: false,
         cleanupDays: 30,
+        chartsCollapsed: true, // 默认折叠图表，优先展示列表
         levelPieChart: null,
         levelBarChart: null,
 
@@ -39,10 +40,28 @@ function serilogManagement() {
             this.loadLogs();
             // 先加载统计数据
             await this.loadStatistics();
-            // 延迟初始化图表，确保DOM完全加载和数据已获取
-            setTimeout(() => {
-                this.initCharts();
-            }, 500);
+            // 图表默认折叠，展开时再初始化
+            if (!this.chartsCollapsed) {
+                setTimeout(() => this.initCharts(), 500);
+            }
+        },
+
+        toggleCharts() {
+            this.chartsCollapsed = !this.chartsCollapsed;
+            if (this.chartsCollapsed) return;
+            this.$nextTick(() => {
+                setTimeout(() => {
+                    if (!this.levelPieChart || !this.levelBarChart) {
+                        this.initCharts();
+                    } else {
+                        try {
+                            this.levelPieChart.resize();
+                            this.levelBarChart.resize();
+                        } catch (e) { /* ignore */ }
+                        this.updateCharts && this.updateCharts();
+                    }
+                }, 80);
+            });
         },
 
         // API请求封装
@@ -60,7 +79,9 @@ function serilogManagement() {
             if (response.status === 401) {
                 console.warn('未授权，跳转到登录页');
                 localStorage.removeItem('authToken');
-                window.location.href = '/login.html';
+                localStorage.removeItem('tokenExpires');
+                localStorage.removeItem('username');
+                window.location.href = '/login';
                 return response;
             }
             
@@ -357,15 +378,15 @@ function serilogManagement() {
         getLevelBadgeClass(level) {
             const levelLower = (level || '').toLowerCase();
             const classes = {
-                'error': 'bg-red-100 text-red-800',
-                'fatal': 'bg-red-100 text-red-800',
-                'warning': 'bg-yellow-100 text-yellow-800',
-                'information': 'bg-blue-100 text-blue-800',
-                'info': 'bg-blue-100 text-blue-800',
-                'debug': 'bg-purple-100 text-purple-800',
-                'verbose': 'bg-gray-100 text-gray-800'
+                'error': 'log-badge-bad',
+                'fatal': 'log-badge-bad',
+                'warning': 'log-badge-warn',
+                'information': 'log-badge-info',
+                'info': 'log-badge-info',
+                'debug': 'log-badge-purple',
+                'verbose': 'log-badge-muted'
             };
-            return classes[levelLower] || 'bg-gray-100 text-gray-800';
+            return classes[levelLower] || 'log-badge-muted';
         },
 
         // 格式化日期时间

@@ -57,9 +57,18 @@ public class HealthCheckService : IHealthCheckService
                     500, (int)stopwatch.ElapsedMilliseconds, "不支持的服务商类型", group.ProviderType, group.BaseUrl);
             }
 
-            // 构建健康检查请求URL
+            // 构建健康检查请求URL（按 Provider 真实 models 端点）
             var baseUrl = provider.GetBaseUrl(new ProviderConfig { BaseUrl = group.BaseUrl });
-            var healthCheckUrl = $"{baseUrl.TrimEnd('/')}/models"; // 使用模型列表端点作为健康检查
+            var modelsEndpoint = provider.GetModelsEndpoint();
+            if (string.IsNullOrWhiteSpace(modelsEndpoint))
+            {
+                modelsEndpoint = "/models";
+            }
+            if (!modelsEndpoint.StartsWith('/'))
+            {
+                modelsEndpoint = "/" + modelsEndpoint;
+            }
+            var healthCheckUrl = $"{baseUrl.TrimEnd('/')}{modelsEndpoint}";
 
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
@@ -70,14 +79,14 @@ public class HealthCheckService : IHealthCheckService
             if (!string.IsNullOrEmpty(apiKey))
             {
                 // 如果提供了API密钥，则添加认证头
-                var headers = provider.PrepareRequestHeaders(apiKey, new ProviderConfig { BaseUrl = group.BaseUrl });
+                var headers = provider.PrepareRequestHeaders(apiKey, BuildMinimalProviderConfig(group));
                 foreach (var header in headers)
                 {
                     request.Headers.TryAddWithoutValidation(header.Key, header.Value);
                 }
             }
 
-            var response = await httpClient.SendAsync(request, cts.Token);
+            using var response = await httpClient.SendAsync(request, cts.Token);
             stopwatch.Stop();
 
             var isSuccess = response.IsSuccessStatusCode;
@@ -88,6 +97,8 @@ public class HealthCheckService : IHealthCheckService
             string? errorMessage = null;
             if (!isSuccess)
             {
+                var upstream = ProbeRequestBuilder.TruncateUpstreamBody(
+                    await response.Content.ReadAsStringAsync(cancellationToken));
                 if (!string.IsNullOrEmpty(apiKey))
                 {
                     // 使用了API密钥的认证检查
@@ -113,6 +124,11 @@ public class HealthCheckService : IHealthCheckService
                         503 => "服务商服务不可用",
                         _ => $"服务商连接失败 (HTTP {statusCode})"
                     };
+                }
+
+                if (!string.IsNullOrEmpty(upstream))
+                {
+                    errorMessage = $"{errorMessage} | upstream: {upstream}";
                 }
             }
 
@@ -162,11 +178,20 @@ public class HealthCheckService : IHealthCheckService
                     500, (int)stopwatch.ElapsedMilliseconds, "不支持的服务商类型", group.ProviderType, group.BaseUrl);
             }
 
-            // 构建API密钥验证请求
+            // 构建API密钥验证请求（按 Provider 真实 models 端点）
             var baseUrl = provider.GetBaseUrl(new ProviderConfig { BaseUrl = group.BaseUrl });
-            var modelsUrl = $"{baseUrl.TrimEnd('/')}/models";
+            var modelsEndpoint = provider.GetModelsEndpoint();
+            if (string.IsNullOrWhiteSpace(modelsEndpoint))
+            {
+                modelsEndpoint = "/models";
+            }
+            if (!modelsEndpoint.StartsWith('/'))
+            {
+                modelsEndpoint = "/" + modelsEndpoint;
+            }
+            var modelsUrl = $"{baseUrl.TrimEnd('/')}{modelsEndpoint}";
 
-            var headers = provider.PrepareRequestHeaders(apiKey, new ProviderConfig { BaseUrl = group.BaseUrl });
+            var headers = provider.PrepareRequestHeaders(apiKey, BuildMinimalProviderConfig(group));
 
             using var request = new HttpRequestMessage(HttpMethod.Get, modelsUrl);
             foreach (var header in headers)
@@ -177,7 +202,7 @@ public class HealthCheckService : IHealthCheckService
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
 
-            var response = await httpClient.SendAsync(request, cts.Token);
+            using var response = await httpClient.SendAsync(request, cts.Token);
             stopwatch.Stop();
 
             var statusCode = (int)response.StatusCode;
@@ -187,6 +212,8 @@ public class HealthCheckService : IHealthCheckService
             string? errorMessage = null;
             if (!isSuccess)
             {
+                var upstream = ProbeRequestBuilder.TruncateUpstreamBody(
+                    await response.Content.ReadAsStringAsync(cancellationToken));
                 errorMessage = statusCode switch
                 {
                     401 => "API密钥无效或未授权",
@@ -197,6 +224,10 @@ public class HealthCheckService : IHealthCheckService
                     503 => "服务商服务不可用",
                     _ => $"密钥验证失败 (HTTP {statusCode})"
                 };
+                if (!string.IsNullOrEmpty(upstream))
+                {
+                    errorMessage = $"{errorMessage} | upstream: {upstream}";
+                }
             }
 
             _logger.LogDebug("API密钥健康检查完成 - GroupId: {GroupId}, KeyHash: {KeyHash}, StatusCode: {StatusCode}, ResponseTime: {ResponseTime}ms",
@@ -247,15 +278,14 @@ public class HealthCheckService : IHealthCheckService
                     500, (int)stopwatch.ElapsedMilliseconds, "不支持的服务商类型", group.ProviderType, group.BaseUrl);
             }
 
-            // 构建模型测试请求JSON
-            var testRequestJson = CreateTestChatRequestJson(modelId);
-            var providerConfig = new ProviderConfig { BaseUrl = group.BaseUrl };
+            var providerConfig = BuildMinimalProviderConfig(group);
+            providerConfig.Model = modelId;
 
-            // 根据不同的Provider类型准备请求内容
+            // 按 Provider 构造探测请求（避免 Gemini 误用 OpenAI body 等）
             HttpContent content;
             try
             {
-                content = await PrepareHealthCheckRequestContentAsync(provider, testRequestJson, modelId, providerConfig, cancellationToken);
+                content = await PrepareHealthCheckRequestContentAsync(provider, modelId, providerConfig, cancellationToken);
             }
             catch (NotSupportedException ex)
             {
@@ -271,7 +301,7 @@ public class HealthCheckService : IHealthCheckService
             var endpoint = provider.GetChatCompletionEndpoint();
 
             // 对于 Gemini provider，需要替换端点中的模型占位符
-            if (provider is GeminiProvider)
+            if (provider is GeminiProvider || string.Equals(group.ProviderType, "gemini", StringComparison.OrdinalIgnoreCase))
             {
                 endpoint = endpoint.Replace("{model}", modelId);
                 _logger.LogDebug("Gemini 健康检查端点已替换模型占位符: {Endpoint}, 模型: {ModelId}", endpoint, modelId);
@@ -286,13 +316,17 @@ public class HealthCheckService : IHealthCheckService
 
             foreach (var header in headers)
             {
+                if (header.Key.Equals("Content-Type", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
                 request.Headers.TryAddWithoutValidation(header.Key, header.Value);
             }
 
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(TimeSpan.FromSeconds(15));
 
-            var response = await httpClient.SendAsync(request, cts.Token);
+            using var response = await httpClient.SendAsync(request, cts.Token);
             stopwatch.Stop();
 
             var statusCode = (int)response.StatusCode;
@@ -302,20 +336,12 @@ public class HealthCheckService : IHealthCheckService
             string? errorMessage = null;
             if (!isSuccess)
             {
-                errorMessage = statusCode switch
-                {
-                    400 => "模型请求参数错误或格式不支持",
-                    401 => "API密钥在模型端点无效",
-                    403 => "密钥没有额度",
-                    404 => "模型不存在或不可用",
-                    429 => "模型请求限流",
-                    500 => "模型服务内部错误",
-                    503 => "模型服务不可用",
-                    _ => $"模型检查失败 (HTTP {statusCode})"
-                };
+                var upstreamBody = await response.Content.ReadAsStringAsync(cts.Token);
+                errorMessage = ProbeRequestBuilder.ComposeErrorMessage(statusCode, upstreamBody);
 
-                // 记录详细的模型检查失败信息
-                _logger.LogWarning("模型健康检查失败 - GroupId: {GroupId}, Model: {ModelId}, StatusCode: {StatusCode}, Error: {ErrorMessage}",
+                // 记录详细的模型检查失败信息（含上游正文摘要）
+                _logger.LogWarning(
+                    "模型健康检查失败 - GroupId: {GroupId}, Model: {ModelId}, StatusCode: {StatusCode}, Error: {ErrorMessage}",
                     groupId, modelId, statusCode, errorMessage);
             }
             else
@@ -346,111 +372,84 @@ public class HealthCheckService : IHealthCheckService
     }
 
     /// <summary>
-    /// 创建测试请求的 JSON 字符串（OpenAI 格式）
-    /// </summary>
-    private string CreateTestChatRequestJson(string modelId)
-    {
-        var requestDict = new Dictionary<string, object>
-        {
-            ["model"] = modelId,
-            ["messages"] = new List<Dictionary<string, object>>
-            {
-                new Dictionary<string, object>
-                {
-                    ["role"] = "user",
-                    ["content"] = "Hello"
-                }
-            },
-            ["max_tokens"] = 1,
-            ["temperature"] = 0.1f
-        };
-        
-        return JsonConvert.SerializeObject(requestDict, new JsonSerializerSettings
-        {
-            NullValueHandling = NullValueHandling.Ignore
-        });
-    }
-
-    /// <summary>
-    /// 根据不同的Provider类型准备健康检查请求内容
+    /// 按 Provider 类型准备健康检查请求内容
     /// </summary>
     private async Task<HttpContent> PrepareHealthCheckRequestContentAsync(
         ILLMProvider provider,
-        string testRequestJson,
         string modelId,
         ProviderConfig providerConfig,
         CancellationToken cancellationToken)
     {
-        // 根据Provider类型使用不同的方法
-        switch (provider)
-        {
-            case AnthropicProvider anthropicProvider:
-                // 将OpenAI格式的JSON转换为Anthropic JSON格式
-                var anthropicRequestJson = ConvertOpenAiJsonToAnthropicJson(testRequestJson);
-                return await anthropicProvider.PrepareAnthropicRequestContentFromJsonAsync(anthropicRequestJson, providerConfig, cancellationToken);
+        var providerType = provider.ProviderType?.ToLowerInvariant() ?? string.Empty;
 
-            default:
-                // 对于其他Provider（OpenAI、Gemini等），使用JSON透传方法
-                return await provider.PrepareRequestContentFromJsonAsync(testRequestJson, providerConfig, cancellationToken);
+        if (provider is AnthropicProvider anthropicProvider || providerType == "anthropic")
+        {
+            var anthropicJson = ProbeRequestBuilder.BuildAnthropicMessagesProbeJson(modelId);
+            if (provider is AnthropicProvider typed)
+            {
+                return await typed.PrepareAnthropicRequestContentFromJsonAsync(anthropicJson, providerConfig, cancellationToken);
+            }
+
+            return await provider.PrepareRequestContentFromJsonAsync(anthropicJson, providerConfig, cancellationToken);
         }
+
+        if (provider is GeminiProvider || providerType == "gemini")
+        {
+            var geminiJson = ProbeRequestBuilder.BuildGeminiGenerateContentProbeJson();
+            return await provider.PrepareRequestContentFromJsonAsync(geminiJson, providerConfig, cancellationToken);
+        }
+
+        // OpenAI / openai_responses / 兼容中转
+        var openAiJson = ProbeRequestBuilder.BuildOpenAiChatProbeJson(modelId);
+        return await provider.PrepareRequestContentFromJsonAsync(openAiJson, providerConfig, cancellationToken);
     }
 
     /// <summary>
-    /// 将OpenAI格式的JSON转换为Anthropic JSON格式（字典模式）
+    /// 健康检查用最小 ProviderConfig（带上分组 headers / 代理）
     /// </summary>
-    private string ConvertOpenAiJsonToAnthropicJson(string openAiJson)
+    private static ProviderConfig BuildMinimalProviderConfig(GroupConfig group)
     {
-        var openAiRequest = JsonConvert.DeserializeObject<Dictionary<string, object>>(openAiJson);
-        if (openAiRequest == null)
-        {
-            throw new ArgumentException("Invalid OpenAI JSON format");
-        }
+        var headers = string.IsNullOrEmpty(group.Headers)
+            ? new Dictionary<string, string>()
+            : JsonConvert.DeserializeObject<Dictionary<string, string>>(group.Headers) ?? new Dictionary<string, string>();
 
-        var anthropicMessages = new List<Dictionary<string, object>>();
-        
-        // 提取 messages
-        if (openAiRequest.TryGetValue("messages", out var messagesObj) && messagesObj is Newtonsoft.Json.Linq.JArray messagesArray)
+        ProxyConfig? proxy = null;
+        if (group.ProxyEnabled && !string.IsNullOrEmpty(group.ProxyConfig))
         {
-            foreach (var msgToken in messagesArray)
+            try
             {
-                var msg = msgToken.ToObject<Dictionary<string, object>>();
-                if (msg != null)
+                var pc = JsonConvert.DeserializeObject<ProxyConfiguration>(group.ProxyConfig);
+                if (pc != null && !string.IsNullOrEmpty(pc.Host))
                 {
-                    var anthropicMessage = new Dictionary<string, object>
+                    proxy = new ProxyConfig
                     {
-                        ["role"] = msg.GetValueOrDefault("role", "user"),
-                        ["content"] = new List<Dictionary<string, object>>
-                        {
-                            new Dictionary<string, object>
-                            {
-                                ["type"] = "text",
-                                ["text"] = msg.GetValueOrDefault("content", "")?.ToString() ?? ""
-                            }
-                        }
+                        Type = pc.Type,
+                        Host = pc.Host,
+                        Port = pc.Port,
+                        Username = pc.Username,
+                        Password = pc.Password,
+                        BypassLocal = pc.BypassLocal,
+                        BypassDomains = pc.BypassDomains ?? new List<string>()
                     };
-                    anthropicMessages.Add(anthropicMessage);
                 }
+            }
+            catch
+            {
+                // ignore invalid proxy config
             }
         }
 
-        var anthropicRequest = new Dictionary<string, object>
+        return new ProviderConfig
         {
-            ["model"] = openAiRequest.GetValueOrDefault("model", ""),
-            ["max_tokens"] = openAiRequest.GetValueOrDefault("max_tokens", 1),
-            ["messages"] = anthropicMessages,
-            ["stream"] = false // 健康检查不使用流式
+            BaseUrl = group.BaseUrl,
+            Headers = headers,
+            ProxyConfig = proxy,
+            GroupId = group.Id,
+            GroupName = group.GroupName,
+            TimeoutSeconds = Math.Max(group.Timeout, 15),
+            ConnectionTimeoutSeconds = 15,
+            ResponseTimeoutSeconds = 15
         };
-
-        // 如果OpenAI请求中有temperature参数，添加到Anthropic请求中
-        if (openAiRequest.ContainsKey("temperature"))
-        {
-            anthropicRequest["temperature"] = openAiRequest["temperature"];
-        }
-
-        return JsonConvert.SerializeObject(anthropicRequest, new JsonSerializerSettings
-        {
-            NullValueHandling = NullValueHandling.Ignore
-        });
     }
 
     private async Task<GroupConfig?> GetGroupConfigAsync(string groupId)

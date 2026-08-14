@@ -259,7 +259,7 @@ function multiProviderDashboard() {
         providerEnabledFilter: "",
         filteredProviders: [],
         providerPage: 1,
-        providersPerPage: 5,
+        providersPerPage: 12,
         validatingAllKeys: false,
         validatingGroups: {}, // 跟踪每个分组的验证状态
 
@@ -269,13 +269,14 @@ function multiProviderDashboard() {
         showBatchAddModal: false,
         submittingGroup: false,
         editingGroupId: "",
+        groupFormTab: "basic", // basic | keys | models | advanced
         message: "",
         messageType: "success",
 
         // 密钥分页相关
         selectedKeys: [],
         keyPage: 1,
-        keysPerPage: 5,
+        keysPerPage: 10,
         batchKeysText: "",
 
         // 密钥验证相关
@@ -394,6 +395,12 @@ function multiProviderDashboard() {
 
         // 系统状态计算属性（已移除平均响应时间计算）
 
+        clearAuthStorage() {
+            localStorage.removeItem('authToken');
+            localStorage.removeItem('tokenExpires');
+            localStorage.removeItem('username');
+        },
+
         async init() {
             // 执行详细的服务器端认证检查
             // 注意：基本的token检查已在HTML中完成，这里主要做服务器端验证
@@ -405,6 +412,14 @@ function multiProviderDashboard() {
 
             // 初始化验证状态对象
             this.validatingGroups = {};
+
+            // 侧栏「账户设置」事件（document，尽早可响应）
+            const openSettings = () => { this.showUserSettingsModal = true; };
+            document.addEventListener('app:open-settings', openSettings);
+            if (location.hash === '#settings' || new URLSearchParams(location.search).get('settings') === '1') {
+                openSettings();
+                try { history.replaceState(null, '', location.pathname); } catch (e) {}
+            }
 
             // 系统健康状态和服务商分组状态需要默认展示
             await this.loadSystemHealth();
@@ -460,19 +475,22 @@ function multiProviderDashboard() {
                                 username: data.user.username || 'admin',
                                 role: data.user.role || 'Admin'
                             };
+                            if (window.AppShell) {
+                                AppShell.setUsername(this.user.username);
+                            }
                         }
                         return true;
                     } else {
-                        localStorage.removeItem('authToken');
+                        this.clearAuthStorage();
                         return false;
                     }
                 } else {
-                    localStorage.removeItem('authToken');
+                    this.clearAuthStorage();
                     return false;
                 }
             } catch (error) {
                 console.error('Authentication check error:', error);
-                localStorage.removeItem('authToken');
+                this.clearAuthStorage();
                 return false;
             }
         },
@@ -576,6 +594,11 @@ function multiProviderDashboard() {
                     // 更新本地用户信息
                     if (this.userForm.newUsername) {
                         this.user.username = this.userForm.newUsername;
+                        if (window.AppShell && typeof AppShell.setUsername === 'function') {
+                            AppShell.setUsername(this.user.username);
+                        } else {
+                            localStorage.setItem('username', this.user.username);
+                        }
                     }
 
                     // 如果修改了密码，立即退出到登录页
@@ -585,7 +608,7 @@ function multiProviderDashboard() {
 
                         // 1.5秒后自动跳转到登录页
                         setTimeout(() => {
-                            localStorage.removeItem('authToken');
+                            this.clearAuthStorage();
                             window.location.href = '/login';
                         }, 1500);
                     } else {
@@ -1064,14 +1087,22 @@ function multiProviderDashboard() {
                                 status: 'success',
                                 error: null,
                                 statusCode: data.status_code || 200,
-                                responseTime: data.response_time_ms
+                                responseTime: data.response_time_ms,
+                                errorCategory: 'ok'
                             };
                         } else {
+                            const category = data.error_category || 'unknown';
+                            // 400/格式类：探测包不兼容，不等于密钥失效或模型彻底不可用
+                            const friendly =
+                                category === 'format_incompatible'
+                                    ? (data.error_message || '探测格式不被上游接受（不一定不可用）')
+                                    : (data.error_message || '检测失败');
                             newResults[model.id] = {
                                 status: 'failed',
-                                error: data.error_message || '检测失败',
+                                error: friendly,
                                 statusCode: data.status_code || 0,
-                                responseTime: data.response_time_ms || 0
+                                responseTime: data.response_time_ms || 0,
+                                errorCategory: category
                             };
                         }
                         this.modelCheckResults = { ...this.modelCheckResults, [groupId]: newResults };
@@ -1495,19 +1526,15 @@ function multiProviderDashboard() {
             }
         },
 
-        // 获取服务商卡片的CSS类
+        // 获取服务商行的状态修饰类（左侧色条，避免整行大块染色）
         getProviderCardClass(provider) {
-            // 首先判断是否禁用
             if (provider.enabled === false) {
-                return 'border-gray-300 bg-gray-100';
+                return 'is-disabled';
             }
-
-            // 如果启用，再判断健康状态
             if (provider.healthy) {
-                return 'border-green-200 bg-green-50';
-            } else {
-                return 'border-red-200 bg-red-50';
+                return 'is-healthy';
             }
+            return 'is-unhealthy';
         },
 
         async validateAllKeys() {
@@ -1724,6 +1751,7 @@ function multiProviderDashboard() {
         // 分组管理方法
         openCreateGroupModal() {
             this.resetGroupForm();
+            this.groupFormTab = "basic";
             this.showCreateGroupModal = true;
         },
 
@@ -1924,6 +1952,7 @@ function multiProviderDashboard() {
                 this.requestParamsValidationMessage = "";
                 this.requestParamsValidationError = false;
 
+                this.groupFormTab = "basic";
                 this.showEditGroupModal = true;
 
                 // 延迟刷新表单UI，确保模态框完全显示后再刷新
@@ -2019,6 +2048,38 @@ function multiProviderDashboard() {
         },
 
         async submitGroupForm() {
+            // 必填校验（Tab 布局后不再依赖 HTML5 required）
+            const gid = (this.groupFormData.group_id || "").trim();
+            const gname = (this.groupFormData.name || "").trim();
+            const ptype = (this.groupFormData.provider_type || "").trim();
+            const baseUrl = (this.groupFormData.base_url || "").trim();
+            if (!gid || !gname || !ptype || !baseUrl) {
+                this.groupFormTab = "basic";
+                const missing = [
+                    !gid && "分组 ID",
+                    !gname && "分组名称",
+                    !ptype && "服务商类型",
+                    !baseUrl && "Base URL",
+                ].filter(Boolean).join("、");
+                this.showMessage(`请完善基本信息：${missing}`, "error");
+                return;
+            }
+
+            // Tab 布局下禁用浏览器原生 URL 约束，改为 JS 校验并切回 basic 提示
+            try {
+                const parsedUrl = new URL(baseUrl);
+                if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+                    throw new Error("unsupported protocol");
+                }
+            } catch (e) {
+                this.groupFormTab = "basic";
+                this.showMessage(
+                    "Base URL 格式无效，请填写以 http:// 或 https:// 开头的完整地址",
+                    "error",
+                );
+                return;
+            }
+
             this.submittingGroup = true;
             try {
                 // 保存当前的页面状态（用于编辑模式保持位置）
@@ -2070,6 +2131,7 @@ function multiProviderDashboard() {
                         this.requestParamsValidationMessage =
                             "JSON格式错误: " + e.message;
                         this.requestParamsValidationError = true;
+                        this.groupFormTab = "advanced";
                         this.submittingGroup = false;
                         return;
                     }
@@ -2090,6 +2152,7 @@ function multiProviderDashboard() {
                         this.headersValidationMessage =
                             "JSON格式错误: " + e.message;
                         this.headersValidationError = true;
+                        this.groupFormTab = "advanced";
                         this.submittingGroup = false;
                         return;
                     }
@@ -2250,10 +2313,12 @@ function multiProviderDashboard() {
             this.showEditGroupModal = false;
             this.showBatchAddModal = false;
             this.editingGroupId = "";
+            this.groupFormTab = "basic";
             this.resetGroupForm();
         },
 
         resetGroupForm() {
+            this.groupFormTab = "basic";
             this.groupFormData = {
                 group_id: "",
                 name: "",
@@ -5098,27 +5163,31 @@ function multiProviderDashboard() {
 }
 
 function logout() {
-    const token = localStorage.getItem('authToken');
-
-    // 清理本地存储
-    localStorage.removeItem('authToken');
-
-    if (token) {
-        fetch("/auth/logout", {
-            method: "POST",
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            }
-        })
-            .then((response) => {
-                window.location.href = "/login";
-            })
-            .catch((error) => {
-                console.error("Logout error:", error);
-                window.location.href = "/login";
-            });
-    } else {
-        window.location.href = "/login";
+    if (window.AppShell && typeof AppShell.logout === "function") {
+        AppShell.logout();
+        return;
     }
+    const token = localStorage.getItem("authToken");
+    localStorage.removeItem("authToken");
+    localStorage.removeItem("tokenExpires");
+    localStorage.removeItem("username");
+    const go = () => {
+        window.location.href = "/login";
+    };
+    if (!token) {
+        go();
+        return;
+    }
+    fetch("/auth/logout", {
+        method: "POST",
+        headers: {
+            Authorization: "Bearer " + token,
+            "Content-Type": "application/json",
+        },
+    })
+        .then(go)
+        .catch((error) => {
+            console.error("Logout error:", error);
+            go();
+        });
 }

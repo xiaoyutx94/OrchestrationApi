@@ -26,7 +26,9 @@ public class AuthenticationMiddleware
         "/",
         "/dashboard.html",
         "/logs.html",
-        "/health-report.html"
+        "/health-report.html",
+        "/serilog",
+        "/serilog.html"
     };
 
     // 公共路径（不需要认证）

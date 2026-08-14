@@ -516,15 +516,19 @@ public class MultiProviderService : IMultiProviderService
     /// </summary>
     /// <param name="routeResult">路由结果</param>
     /// <returns>提供商配置</returns>
-    private static ProviderConfig BuildProviderConfig(ProviderRouteResult routeResult)
+    private ProviderConfig BuildProviderConfig(ProviderRouteResult routeResult)
     {
         var group = routeResult.Group!;
+        var connectionTimeout = _configuration.GetValue<int>("OrchestrationApi:Global:ConnectionTimeout", 30);
+        var responseTimeout = _configuration.GetValue<int>("OrchestrationApi:Global:ResponseTimeout", 300);
 
         return new ProviderConfig
         {
             ApiKeys = new List<string> { routeResult.ApiKey! },
             BaseUrl = string.IsNullOrWhiteSpace(group.BaseUrl) ? null : group.BaseUrl,
             TimeoutSeconds = group.Timeout,
+            ConnectionTimeoutSeconds = connectionTimeout,
+            ResponseTimeoutSeconds = responseTimeout > 0 ? responseTimeout : Math.Max(group.Timeout, 30),
             MaxRetries = group.RetryCount,
             Headers = JsonConvert.DeserializeObject<Dictionary<string, string>>(group.Headers ?? "{}") ?? new Dictionary<string, string>(),
             ModelAliases = string.IsNullOrEmpty(group.ModelAliases) ? new() : JsonConvert.DeserializeObject<Dictionary<string, string>>(group.ModelAliases) ?? new(),
@@ -830,10 +834,8 @@ public class MultiProviderService : IMultiProviderService
                     // 将修改后的字典序列化为JSON字符串
                     var modifiedRequestJson = JsonConvert.SerializeObject(requestDict);
 
-                    // 准备HTTP请求内容（Provider需要支持接收JSON字符串）
-                    var httpContent = await provider.PrepareRequestContentFromJsonAsync(modifiedRequestJson, providerConfig, cancellationToken);
-
                     // 使用统一的重试策略（移除内部重试循环）
+                    // 注意：每次 attempt 必须新建 HttpContent，HttpContent 默认不可重复发送
                     var maxRetries = routeResult.Group.RetryCount;
                     for (int attempt = 0; attempt <= maxRetries; attempt++)
                     {
@@ -861,6 +863,10 @@ public class MultiProviderService : IMultiProviderService
 
                             _logger.LogDebug("发送HTTP请求 - RequestId: {RequestId}, 服务商: {ProviderType}, 分组: {GroupId}, 尝试: {Attempt}, API密钥: {ApiKey}",
                                 requestId, routeResult.Group.ProviderType, routeResult.Group.Id, attempt + 1, currentApiKey?[..8] + "...");
+
+                            // 每次尝试重建请求体，避免重试/换 key 时 Content 已被消费
+                            using var httpContent = await provider.PrepareRequestContentFromJsonAsync(
+                                modifiedRequestJson, providerConfig, cancellationToken);
 
                             // 发送HTTP请求（Provider不再包含重试逻辑）
                             // 注意：这里不能直接传入request.Stream，因为假流模式需要发送非流式请求到上游
@@ -1171,11 +1177,7 @@ public class MultiProviderService : IMultiProviderService
                     // 设置端点类型为responses
                     providerConfig.EndpointType = "responses";
 
-                    // 准备Responses API请求内容（JSON透传模式）
-                    var httpContent = new StringContent(requestJson, Encoding.UTF8);
-                    httpContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
-
-                    // 使用统一的重试策略
+                    // 使用统一的重试策略（每次 attempt 新建 HttpContent）
                     var maxRetries = routeResult.Group.RetryCount;
                     for (int attempt = 0; attempt <= maxRetries; attempt++)
                     {
@@ -1202,6 +1204,10 @@ public class MultiProviderService : IMultiProviderService
 
                             _logger.LogDebug("发送Responses HTTP请求 - RequestId: {RequestId}, 服务商: {ProviderType}, 分组: {GroupId}, 尝试: {Attempt}",
                                 requestId, routeResult.Group.ProviderType, routeResult.Group.Id, attempt + 1);
+
+                            // 每次尝试重建请求体，避免 Content 被消费后无法重试
+                            using var httpContent = new StringContent(requestJson, Encoding.UTF8);
+                            httpContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
 
                             // 发送HTTP请求
                             // 注意：假流模式需要发送非流式请求到上游

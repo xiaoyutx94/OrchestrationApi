@@ -243,7 +243,10 @@ public class KeyManager : IKeyManager
     private readonly IProviderFactory _providerFactory;
     private readonly Dictionary<string, Dictionary<string, DateTime>> _keyLastUsed;
     private readonly Dictionary<string, Dictionary<string, int>> _keyUsageCount; // 添加密钥使用次数统计
-    private readonly Dictionary<string, int> _keyIndexes;
+    /// <summary>
+    /// 进程级轮询索引（KeyManager 为 Scoped，实例字段无法跨请求轮询）
+    /// </summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> s_keyIndexes = new();
     private readonly Lock _lockObj = new();
 
     public KeyManager(ISqlSugarClient db, ILogger<KeyManager> logger, IMemoryCache cache, IProviderFactory providerFactory)
@@ -254,7 +257,6 @@ public class KeyManager : IKeyManager
         _providerFactory = providerFactory;
         _keyLastUsed = [];
         _keyUsageCount = []; // 初始化密钥使用次数统计
-        _keyIndexes = [];
     }
 
     public async Task<string?> GetNextKeyAsync(string groupId)
@@ -559,15 +561,12 @@ public class KeyManager : IKeyManager
 
     private string SelectRoundRobinKey(string groupId, List<string> keys)
     {
-        if (!_keyIndexes.TryGetValue(groupId, out int value))
-        {
-            value = 0;
-            _keyIndexes[groupId] = value;
-        }
-
-        var index = value % keys.Count;
-        _keyIndexes[groupId] = (index + 1) % keys.Count;
-
+        var next = s_keyIndexes.AddOrUpdate(
+            groupId,
+            1,
+            static (_, current) => current + 1);
+        var index = (next - 1) % keys.Count;
+        if (index < 0) index += keys.Count;
         return keys[index];
     }
 
@@ -1826,6 +1825,12 @@ public class KeyManager : IKeyManager
                 return await ValidateGeminiApiKeyAsync(provider, apiKey, group);
             }
 
+            // Anthropic 使用原生 messages 探测包
+            if (provider.ProviderType.ToLower() == "anthropic")
+            {
+                return await ValidateAnthropicApiKeyAsync(provider, apiKey, group);
+            }
+
             // 对于其他服务商，使用通用的 OpenAI 格式验证
             return await ValidateGenericApiKeyAsync(provider, apiKey, group);
         }
@@ -1850,49 +1855,33 @@ public class KeyManager : IKeyManager
                 ? new Dictionary<string, string>()
                 : JsonConvert.DeserializeObject<Dictionary<string, string>>(group.Headers) ?? new Dictionary<string, string>();
 
-            var providerConfig = new ProviderConfig
-            {
-                ApiKeys = [apiKey],
-                BaseUrl = group.BaseUrl,
-                TimeoutSeconds = 30,
-                MaxRetries = 0,  // 验证时不重试
-                GroupId = group.Id,
-                GroupName = group.GroupName,
-                Headers = groupHeaders  // 添加分组配置的请求头
-            };
-
             // 创建一个非常简单的测试请求，限制最大token数量
             var configuredModels = JsonConvert.DeserializeObject<string[]>(group.Models);
             var testModel = string.IsNullOrWhiteSpace(group.TestModel)
                 ? (configuredModels?.FirstOrDefault() ?? GetDefaultModelForProvider(group.ProviderType))
                 : group.TestModel;
 
-            // 使用字典构建测试请求的JSON
-            var testRequestDict = new Dictionary<string, object>
+            var providerConfig = new ProviderConfig
             {
-                ["model"] = testModel,
-                ["messages"] = new List<Dictionary<string, object>>
-                {
-                    new Dictionary<string, object>
-                    {
-                        ["role"] = "user",
-                        ["content"] = "hi"
-                    }
-                },
-                ["max_tokens"] = 1,  // 限制响应长度
-                ["temperature"] = 0  // 确保响应一致性
+                ApiKeys = [apiKey],
+                BaseUrl = group.BaseUrl,
+                TimeoutSeconds = 30,
+                MaxRetries = 0,  // 验证时不重试
+                Model = testModel,
+                GroupId = group.Id,
+                GroupName = group.GroupName,
+                Headers = groupHeaders,
+                ProxyConfig = ParseGroupProxyConfig(group)
             };
 
-            var testRequestJson = JsonConvert.SerializeObject(testRequestDict, new JsonSerializerSettings
-            {
-                NullValueHandling = NullValueHandling.Ignore
-            });
+            // 与模型健康检查对齐的 OpenAI 探测包（含 reasoning 模型适配）
+            var testRequestJson = OrchestrationApi.Utils.ProbeRequestBuilder.BuildOpenAiChatProbeJson(testModel, "hi");
 
             // 使用30秒超时进行验证
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
             // 调用实际的API使用新的HTTP代理方法（JSON透传）
-            var httpContent = await provider.PrepareRequestContentFromJsonAsync(testRequestJson, providerConfig, cts.Token);
+            using var httpContent = await provider.PrepareRequestContentFromJsonAsync(testRequestJson, providerConfig, cts.Token);
             var httpResponse = await provider.SendHttpRequestAsync(httpContent, apiKey, providerConfig, false, cts.Token);
 
             // 返回验证结果和状态码
@@ -1918,7 +1907,6 @@ public class KeyManager : IKeyManager
     {
         try
         {
-            // 构建 Gemini 专用的验证请求配置
             var groupHeaders = string.IsNullOrEmpty(group.Headers)
                 ? new Dictionary<string, string>()
                 : JsonConvert.DeserializeObject<Dictionary<string, string>>(group.Headers) ?? new Dictionary<string, string>();
@@ -1933,49 +1921,80 @@ public class KeyManager : IKeyManager
                 ApiKeys = [apiKey],
                 BaseUrl = group.BaseUrl,
                 TimeoutSeconds = 30,
-                MaxRetries = 0,  // 验证时不重试
+                MaxRetries = 0,
                 Model = testModel,
                 GroupId = group.Id,
                 GroupName = group.GroupName,
-                Headers = groupHeaders  // 添加分组配置的请求头
+                Headers = groupHeaders,
+                ProxyConfig = ParseGroupProxyConfig(group)
             };
 
-            // 创建 Gemini 原生格式的测试请求（使用字典构建）
-            var geminiTestRequest = new Dictionary<string, object>
-            {
-                ["contents"] = new List<Dictionary<string, object>>
-                {
-                    new Dictionary<string, object>
-                    {
-                        ["role"] = "user",
-                        ["parts"] = new List<Dictionary<string, object>>
-                        {
-                            new Dictionary<string, object> { ["text"] = "Hi" }
-                        }
-                    }
-                },
-                ["generationConfig"] = new Dictionary<string, object>
-                {
-                    ["maxOutputTokens"] = 1,
-                    ["temperature"] = 0.0,
-                    ["thinkingConfig"] = new Dictionary<string, object>
-                    {
-                        ["thinkingBudget"] = 0
-                    }
-                }
-            };
+            var geminiTestJson = OrchestrationApi.Utils.ProbeRequestBuilder.BuildGeminiGenerateContentProbeJson("Hi");
 
-            // 使用30秒超时进行验证
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            using var httpContent = await provider.PrepareRequestContentFromJsonAsync(geminiTestJson, providerConfig, cts.Token);
+            var httpResponse = await provider.SendHttpRequestAsync(httpContent, apiKey, providerConfig, false, cts.Token);
 
-            // 检查 provider 是否为 GeminiProvider 并支持原生请求格式
-            if (provider is GeminiProvider geminiProvider)
+            return new KeyValidationResult
             {
-                // 序列化为JSON并使用JSON透传方法
-                var geminiTestJson = JsonConvert.SerializeObject(geminiTestRequest);
-                var httpContent = await geminiProvider.PrepareRequestContentFromJsonAsync(geminiTestJson, providerConfig, cts.Token);
-                var httpResponse = await geminiProvider.SendHttpRequestAsync(httpContent, apiKey, providerConfig, false, cts.Token);
+                IsValid = httpResponse.IsSuccess,
+                StatusCode = httpResponse.StatusCode,
+                ErrorMessage = httpResponse.ErrorMessage ?? string.Empty
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Gemini API密钥验证失败 - Error: {Error}", ex.Message);
+            return new KeyValidationResult { IsValid = false, StatusCode = null, ErrorMessage = ex.Message };
+        }
+    }
 
+    /// <summary>
+    /// 使用 Anthropic 原生 messages 格式进行API密钥验证
+    /// </summary>
+    private async Task<KeyValidationResult> ValidateAnthropicApiKeyAsync(ILLMProvider provider, string apiKey, GroupConfig group)
+    {
+        try
+        {
+            var groupHeaders = string.IsNullOrEmpty(group.Headers)
+                ? new Dictionary<string, string>()
+                : JsonConvert.DeserializeObject<Dictionary<string, string>>(group.Headers) ?? new Dictionary<string, string>();
+
+            var configuredModels = JsonConvert.DeserializeObject<string[]>(group.Models);
+            var testModel = string.IsNullOrWhiteSpace(group.TestModel)
+                ? (configuredModels?.FirstOrDefault() ?? GetDefaultModelForProvider(group.ProviderType))
+                : group.TestModel;
+
+            var providerConfig = new ProviderConfig
+            {
+                ApiKeys = [apiKey],
+                BaseUrl = group.BaseUrl,
+                TimeoutSeconds = 30,
+                MaxRetries = 0,
+                Model = testModel,
+                GroupId = group.Id,
+                GroupName = group.GroupName,
+                Headers = groupHeaders,
+                ProxyConfig = ParseGroupProxyConfig(group)
+            };
+
+            var anthropicJson = OrchestrationApi.Utils.ProbeRequestBuilder.BuildAnthropicMessagesProbeJson(testModel, "hi");
+
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            HttpContent httpContent;
+            if (provider is AnthropicProvider anthropicProvider)
+            {
+                httpContent = await anthropicProvider.PrepareAnthropicRequestContentFromJsonAsync(
+                    anthropicJson, providerConfig, cts.Token);
+            }
+            else
+            {
+                httpContent = await provider.PrepareRequestContentFromJsonAsync(anthropicJson, providerConfig, cts.Token);
+            }
+
+            using (httpContent)
+            {
+                var httpResponse = await provider.SendHttpRequestAsync(httpContent, apiKey, providerConfig, false, cts.Token);
                 return new KeyValidationResult
                 {
                     IsValid = httpResponse.IsSuccess,
@@ -1983,15 +2002,43 @@ public class KeyManager : IKeyManager
                     ErrorMessage = httpResponse.ErrorMessage ?? string.Empty
                 };
             }
-            else
-            {
-                return new KeyValidationResult { IsValid = false, StatusCode = null, ErrorMessage = "不支持的Gemini Provider类型" };
-            }
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Gemini API密钥验证失败 - Error: {Error}", ex.Message);
+            _logger.LogDebug(ex, "Anthropic API密钥验证失败 - Error: {Error}", ex.Message);
             return new KeyValidationResult { IsValid = false, StatusCode = null, ErrorMessage = ex.Message };
+        }
+    }
+
+    private static ProxyConfig? ParseGroupProxyConfig(GroupConfig group)
+    {
+        if (!group.ProxyEnabled || string.IsNullOrEmpty(group.ProxyConfig))
+        {
+            return null;
+        }
+
+        try
+        {
+            var pc = JsonConvert.DeserializeObject<ProxyConfiguration>(group.ProxyConfig);
+            if (pc == null || string.IsNullOrEmpty(pc.Host))
+            {
+                return null;
+            }
+
+            return new ProxyConfig
+            {
+                Type = pc.Type,
+                Host = pc.Host,
+                Port = pc.Port,
+                Username = pc.Username,
+                Password = pc.Password,
+                BypassLocal = pc.BypassLocal,
+                BypassDomains = pc.BypassDomains ?? new List<string>()
+            };
+        }
+        catch
+        {
+            return null;
         }
     }
 
@@ -2329,19 +2376,7 @@ public class KeyManager : IKeyManager
     /// </summary>
     private string SelectKeyRoundRobin(string groupId, List<string> availableKeys)
     {
-        lock (_lockObj)
-        {
-            if (!_keyIndexes.TryGetValue(groupId, out int value))
-            {
-                value = 0;
-                _keyIndexes[groupId] = value;
-            }
-
-            var index = value % availableKeys.Count;
-            _keyIndexes[groupId] = (index + 1) % availableKeys.Count;
-
-            return availableKeys[index];
-        }
+        return SelectRoundRobinKey(groupId, availableKeys);
     }
 
     /// <summary>

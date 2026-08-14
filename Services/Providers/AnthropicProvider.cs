@@ -1,5 +1,6 @@
 using OrchestrationApi.Models;
 using OrchestrationApi.Services.Core;
+using OrchestrationApi.Utils;
 using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using Newtonsoft.Json;
@@ -169,18 +170,26 @@ public class AnthropicProvider : ILLMProvider
                 _logger.LogDebug("Anthropic HTTP请求成功，状态码: {StatusCode}, 耗时: {ElapsedMs}ms, 分组: {GroupId}({GroupName})",
                     (int)response.StatusCode, elapsedMs, config.GroupId ?? "未知", config.GroupName ?? "未知");
 
-                var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
+                var innerStream = await response.Content.ReadAsStreamAsync(cancellationToken);
                 return new ProviderHttpResponse
                 {
                     IsSuccess = true,
                     StatusCode = (int)response.StatusCode,
                     Headers = responseHeaders,
-                    ResponseStream = responseStream
+                    ResponseStream = new HttpResponseMessageStream(response, innerStream)
                 };
             }
             else
             {
-                var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
+                string errorContent;
+                try
+                {
+                    errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
+                }
+                finally
+                {
+                    response.Dispose();
+                }
                 var (shouldRetry, shouldTryNextKey, errorMessage) = CheckErrorResponse((int)response.StatusCode, errorContent);
                 
                 _logger.LogWarning("Anthropic HTTP请求失败，状态码: {StatusCode}, 耗时: {ElapsedMs}ms, 错误: {Error}, 分组: {GroupId}({GroupName})",

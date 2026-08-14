@@ -115,10 +115,10 @@ builder.Services.AddScoped<AnthropicProvider>(provider =>
 
 builder.Services.AddScoped<GeminiProvider>(provider =>
 {
-    var httpClient = provider.GetRequiredService<HttpClient>();
+    var proxyHttpClientService = provider.GetRequiredService<IProxyHttpClientService>();
     var logger = provider.GetRequiredService<ILogger<GeminiProvider>>();
     var configuration = provider.GetRequiredService<IConfiguration>();
-    return new GeminiProvider(httpClient, logger, configuration);
+    return new GeminiProvider(proxyHttpClientService, logger, configuration);
 });
 
 builder.Services.AddScoped<IMultiProviderService, MultiProviderService>();

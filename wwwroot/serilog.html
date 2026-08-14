@@ -10,324 +10,179 @@
     <link rel="icon" href="/favicon.png?v=2" type="image/png">
     <link rel="shortcut icon" href="/favicon.ico?v=2" type="image/x-icon">
     <link rel="apple-touch-icon" href="/favicon.png?v=2" />
-
-    <!-- 早期认证检查脚本 - 在页面渲染前执行 -->
-    <script>
-        // 立即检查认证状态，避免显示未授权内容
-        (function () {
-            const token = localStorage.getItem('authToken');
-            if (!token) {
-                // 没有token，立即跳转到登录页
-                window.location.href = '/login';
-                return;
-            }
-
-            // 有token，但需要验证其有效性
-            try {
-                // 简单的JWT token格式检查
-                const parts = token.split('.');
-                if (parts.length !== 3) {
-                    localStorage.removeItem('authToken');
-                    localStorage.removeItem('tokenExpires');
-                    window.location.href = '/login';
-                    return;
-                }
-
-                // 检查本地存储的过期时间
-                const tokenExpires = localStorage.getItem('tokenExpires');
-                if (tokenExpires) {
-                    const expiresAt = new Date(tokenExpires);
-                    const now = new Date();
-                    if (now >= expiresAt) {
-                        // token已过期
-                        localStorage.removeItem('authToken');
-                        localStorage.removeItem('tokenExpires');
-                        window.location.href = '/login';
-                        return;
-                    }
-                }
-            } catch (error) {
-                localStorage.removeItem('authToken');
-                localStorage.removeItem('tokenExpires');
-                window.location.href = '/login';
-                return;
-            }
-        })();
-    </script>
-
-    <!-- Google Fonts: Inter -->
+    <script src="js/app-shell.js"></script>
+    <script>AppShell.earlyAuthCheck();document.documentElement.classList.add("app-pending");</script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="js/theme-config.js"></script>
     <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+    <link rel="stylesheet" href="css/app.css">
     <link rel="stylesheet" href="css/logs.css">
 
 </head>
 
-<body class="font-sans bg-gray-50 min-h-screen text-gray-800">
-    <div class="container mx-auto px-4 py-8" x-data="serilogManagement()">
-        <!-- Header -->
-        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4 bg-white/80 backdrop-blur-md p-6 rounded-2xl shadow-soft border border-white/50 sticky top-4 z-40 transition-all duration-300 hover:shadow-lg">
-            <div>
-                <div class="flex items-center gap-3 mb-1">
-                    <div class="w-10 h-10 bg-gradient-to-tr from-primary-500 to-primary-600 rounded-xl shadow-lg shadow-primary-500/20 flex items-center justify-center text-white">
-                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
-                    </div>
-                    <h1 class="text-2xl sm:text-3xl font-bold text-gray-900 tracking-tight">系统日志</h1>
-                </div>
-                <p class="text-gray-500 ml-1">查看和分析Serilog系统日志</p>
-            </div>
-            <div class="flex flex-wrap gap-2">
-                <a href="/dashboard"
-                    class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-xl transition duration-200">
-                    返回仪表板
-                </a>
-                <a href="/health-report"
-                    class="bg-orange-500 hover:bg-orange-600 text-white px-3 py-2 sm:px-4 rounded-xl transition duration-200 text-center text-sm">
-                    <span>健康检查结果</span>
-                </a>
-                <button @click="toggleAutoRefresh()"
-                    :class="autoRefresh ? 'bg-green-500 hover:bg-green-600' : 'bg-gray-500 hover:bg-gray-600'"
-                    class="text-white px-4 py-2 rounded-xl transition duration-200">
-                    <span x-text="autoRefresh ? '自动刷新: 开' : '自动刷新: 关'"></span>
-                </button>
-            </div>
-        </div>
-
-        <!-- Statistics Cards -->
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-            <div class="bg-white/80 backdrop-blur-md rounded-2xl shadow-soft border border-white/50 p-6 fade-in">
-                <div class="flex items-center justify-between">
-                    <div>
-                        <p class="text-gray-500 text-sm mb-1">总日志数</p>
-                        <p class="text-3xl font-bold text-gray-800" x-text="statistics.totalLogs"></p>
-                    </div>
-                    <div class="bg-blue-500 rounded-full p-3">
-                        <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z">
-                            </path>
-                        </svg>
+<body class="app-body">
+    <div class="app-shell" x-data="serilogManagement()">
+        <div id="app-sidebar-root"></div>
+        <div class="app-main">
+            <header class="app-topbar">
+                <div class="app-topbar-left">
+                    <button type="button" class="btn btn-ghost btn-sm sidebar-toggle" data-app-action="toggle-sidebar" aria-label="切换侧栏">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+                    </button>
+                    <div class="app-topbar-titles">
+                        <h1 class="app-page-title">系统日志</h1>
+                        <p class="app-page-sub">Serilog 运行时诊断</p>
                     </div>
                 </div>
-            </div>
-
-            <div class="bg-white/80 backdrop-blur-md rounded-2xl shadow-soft border border-white/50 p-6 fade-in">
-                <div class="flex items-center justify-between">
-                    <div>
-                        <p class="text-gray-500 text-sm mb-1">最近24小时</p>
-                        <p class="text-3xl font-bold text-gray-800" x-text="statistics.last24Hours"></p>
-                    </div>
-                    <div class="bg-green-500 rounded-full p-3">
-                        <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                        </svg>
-                    </div>
+                <div class="app-topbar-right">
+                    <button type="button" class="btn btn-sm" :class="autoRefresh ? 'btn-success' : 'btn-ghost'" @click="toggleAutoRefresh()">
+                        <span x-text="autoRefresh ? '自动刷新: 开' : '自动刷新: 关'"></span>
+                    </button>
                 </div>
-            </div>
+            </header>
+            <main class="app-content">
+                <!-- 紧凑指标 -->
+                <section class="log-stats mb-3" aria-label="系统日志统计">
+                    <div class="log-stat">
+                        <span class="log-stat-label">总日志</span>
+                        <span class="log-stat-value tabular-nums" x-text="statistics.totalLogs">0</span>
+                    </div>
+                    <div class="log-stat is-ok">
+                        <span class="log-stat-label">近24小时</span>
+                        <span class="log-stat-value tabular-nums" x-text="statistics.last24Hours">0</span>
+                    </div>
+                    <div class="log-stat is-info">
+                        <span class="log-stat-label">近1小时</span>
+                        <span class="log-stat-value tabular-nums" x-text="statistics.lastHour">0</span>
+                    </div>
+                    <div class="log-stat is-purple">
+                        <span class="log-stat-label">库大小</span>
+                        <span class="log-stat-value tabular-nums" x-text="formatBytes(statistics.databaseSize)">0</span>
+                    </div>
+                </section>
 
-            <div class="bg-white/80 backdrop-blur-md rounded-2xl shadow-soft border border-white/50 p-6 fade-in">
-                <div class="flex items-center justify-between">
-                    <div>
-                        <p class="text-gray-500 text-sm mb-1">最近1小时</p>
-                        <p class="text-3xl font-bold text-gray-800" x-text="statistics.lastHour"></p>
+                <!-- 级别分布图表（可折叠） -->
+                <section class="log-panel mb-3">
+                    <div class="log-panel-head">
+                        <button type="button" class="log-panel-toggle" @click="toggleCharts()">
+                            <svg class="log-chevron" :class="{'is-collapsed': chartsCollapsed}" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6"/></svg>
+                            <h2 class="log-panel-title">级别分布</h2>
+                        </button>
                     </div>
-                    <div class="bg-yellow-500 rounded-full p-3">
-                        <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M13 10V3L4 14h7v7l9-11h-7z"></path>
-                        </svg>
-                    </div>
-                </div>
-            </div>
-
-            <div class="bg-white/80 backdrop-blur-md rounded-2xl shadow-soft border border-white/50 p-6 fade-in">
-                <div class="flex items-center justify-between">
-                    <div>
-                        <p class="text-gray-500 text-sm mb-1">数据库大小</p>
-                        <p class="text-3xl font-bold text-gray-800" x-text="formatBytes(statistics.databaseSize)"></p>
-                    </div>
-                    <div class="bg-purple-500 rounded-full p-3">
-                        <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4">
-                            </path>
-                        </svg>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Charts -->
-        <div class="bg-white/80 backdrop-blur-md rounded-2xl shadow-soft border border-white/50 p-6 mb-8 fade-in">
-            <h2 class="text-xl font-bold mb-4">日志级别分布</h2>
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6" style="min-height: 350px;">
-                <template x-if="Object.keys(statistics.logsByLevel).length > 0">
-                    <!-- 饼图 -->
-                    <div class="bg-gray-50 rounded-xl p-4 relative">
-                        <h3 class="text-lg font-semibold mb-4 text-center text-gray-700">级别占比</h3>
-                        <div class="chart-container">
-                            <canvas id="levelPieChart"></canvas>
+                    <div class="log-panel-body" x-show="!chartsCollapsed">
+                        <div class="log-charts-grid" x-show="Object.keys(statistics.logsByLevel || {}).length > 0">
+                            <div class="log-chart-card">
+                                <h3 class="log-chart-title">级别占比</h3>
+                                <div class="chart-container chart-container-sm">
+                                    <canvas id="levelPieChart"></canvas>
+                                </div>
+                            </div>
+                            <div class="log-chart-card">
+                                <h3 class="log-chart-title">级别数量</h3>
+                                <div class="chart-container chart-container-sm">
+                                    <canvas id="levelBarChart"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                        <div x-show="Object.keys(statistics.logsByLevel || {}).length === 0" class="log-empty-inline">
+                            暂无级别统计数据
                         </div>
                     </div>
-                </template>
-                <template x-if="Object.keys(statistics.logsByLevel).length > 0">
-                    <!-- 柱状图 -->
-                    <div class="bg-gray-50 rounded-xl p-4 relative">
-                        <h3 class="text-lg font-semibold mb-4 text-center text-gray-700">级别数量</h3>
-                        <div class="chart-container">
-                            <canvas id="levelBarChart"></canvas>
+                </section>
+
+                <!-- 筛选 + 列表 -->
+                <section class="log-panel mb-4">
+                    <div class="log-panel-head">
+                        <div class="flex items-center gap-2 min-w-0">
+                            <h2 class="log-panel-title">系统日志</h2>
+                            <span class="log-count tabular-nums" x-text="totalLogs + ' 条'"></span>
+                        </div>
+                        <div class="log-panel-actions">
+                            <button type="button" @click="showCleanupModal = true" class="btn btn-danger btn-sm">清理旧日志</button>
                         </div>
                     </div>
-                </template>
-                <template x-if="Object.keys(statistics.logsByLevel).length === 0">
-                    <div class="col-span-full text-center text-gray-500 py-8">
-                        暂无日志数据
+
+                    <div class="log-filter-bar">
+                        <select x-model="filters.level" class="log-select" title="日志级别">
+                            <option value="">全部级别</option>
+                            <template x-for="level in levels" :key="level">
+                                <option :value="level" x-text="level"></option>
+                            </template>
+                        </select>
+                        <div class="log-search-field">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                            <input type="text" x-model="filters.keyword" placeholder="搜索消息或异常…"
+                                @keyup.enter="applyFilters()" class="log-input" />
+                        </div>
+                        <input type="datetime-local" x-model="filters.startTime" class="log-input" title="开始时间" />
+                        <input type="datetime-local" x-model="filters.endTime" class="log-input" title="结束时间" />
+                        <button type="button" @click="applyFilters()" class="btn btn-primary btn-sm">筛选</button>
+                        <button type="button" @click="resetFilters()" class="btn btn-secondary btn-sm">重置</button>
                     </div>
-                </template>
-            </div>
-        </div>
 
-        <!-- Filters -->
-        <div class="bg-white/80 backdrop-blur-md rounded-2xl shadow-soft border border-white/50 p-6 mb-8 fade-in">
-            <h2 class="text-xl font-bold mb-4">筛选条件</h2>
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">日志级别</label>
-                    <select x-model="filters.level"
-                        class="w-full px-3 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500">
-                        <option value="">全部级别</option>
-                        <template x-for="level in levels" :key="level">
-                            <option :value="level" x-text="level"></option>
-                        </template>
-                    </select>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">关键字搜索</label>
-                    <input type="text" x-model="filters.keyword" placeholder="搜索消息或异常..." @keyup.enter="applyFilters()"
-                        class="w-full px-3 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500">
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">开始时间</label>
-                    <input type="datetime-local" x-model="filters.startTime"
-                        class="w-full px-3 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500">
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">结束时间</label>
-                    <input type="datetime-local" x-model="filters.endTime"
-                        class="w-full px-3 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500">
-                </div>
-            </div>
-            <div class="flex flex-wrap gap-2">
-                <button @click="applyFilters()"
-                    class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-xl transition duration-200">
-                    应用筛选
-                </button>
-                <button @click="resetFilters()"
-                    class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-xl transition duration-200">
-                    重置筛选
-                </button>
-            </div>
-        </div>
+                    <div x-show="loading" class="log-loading">
+                        <svg class="animate-spin" width="22" height="22" viewBox="0 0 24 24" fill="none">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                        </svg>
+                        <span>加载中…</span>
+                    </div>
 
-        <!-- Logs Table -->
-        <div class="bg-white/80 backdrop-blur-md rounded-2xl shadow-soft border border-white/50 p-6 fade-in">
-            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
-                <h2 class="text-xl font-bold">日志列表</h2>
-                <div class="flex flex-wrap gap-2">
-                    <button @click="showCleanupModal = true"
-                        class="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded text-sm transition duration-200">
-                        清理旧日志
-                    </button>
-                </div>
-            </div>
+                    <div x-show="!loading" class="log-table-wrap">
+                        <table class="log-table">
+                            <thead>
+                                <tr>
+                                    <th class="col-id">ID</th>
+                                    <th class="col-time">时间</th>
+                                    <th class="col-level">级别</th>
+                                    <th>消息</th>
+                                    <th class="col-act">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template x-if="logs.length === 0">
+                                    <tr>
+                                        <td colspan="5" class="log-empty-cell">暂无日志数据</td>
+                                    </tr>
+                                </template>
+                                <template x-for="log in logs" :key="log.id">
+                                    <tr>
+                                        <td class="col-id mono tabular-nums" x-text="log.id"></td>
+                                        <td class="col-time mono nowrap" x-text="formatDateTime(log.timestamp)"></td>
+                                        <td class="col-level">
+                                            <span class="log-badge" :class="getLevelBadgeClass(log.level)"
+                                                x-text="log.level || 'Unknown'"></span>
+                                        </td>
+                                        <td class="msg-cell truncate" x-text="log.message || '—'" :title="log.message"></td>
+                                        <td class="col-act">
+                                            <button type="button" @click="showLogDetail(log)" class="log-link-btn">详情</button>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
 
-            <!-- Loading State -->
-            <div x-show="loading" class="text-center py-12">
-                <div class="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
-                <p class="mt-4 text-gray-600">加载中...</p>
-            </div>
-
-            <!-- Logs Table -->
-            <div x-show="!loading" class="overflow-x-auto">
-                <table class="w-full divide-y divide-gray-200 table-fixed">
-                    <colgroup>
-                        <col style="width: 60px;">
-                        <col style="width: 160px;">
-                        <col style="width: 100px;">
-                        <col style="width: auto;">
-                        <col style="width: 80px;">
-                    </colgroup>
-                    <thead class="bg-gray-50">
-                        <tr>
-                            <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                ID</th>
-                            <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                时间</th>
-                            <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                级别</th>
-                            <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                消息</th>
-                            <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                操作</th>
-                        </tr>
-                    </thead>
-                    <tbody class="bg-white divide-y divide-gray-200">
-                        <template x-if="logs.length === 0">
-                            <tr>
-                                <td colspan="5" class="px-6 py-12 text-center text-gray-500">
-                                    暂无日志数据
-                                </td>
-                            </tr>
-                        </template>
-                        <template x-for="log in logs" :key="log.id">
-                            <tr class="hover:bg-gray-50 transition duration-150">
-                                <td class="px-3 py-4 whitespace-nowrap text-sm text-gray-900" x-text="log.id"></td>
-                                <td class="px-3 py-4 whitespace-nowrap text-sm text-gray-900"
-                                    x-text="formatDateTime(log.timestamp)"></td>
-                                <td class="px-3 py-4 whitespace-nowrap">
-                                    <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full"
-                                        :class="getLevelBadgeClass(log.level)" x-text="log.level || 'Unknown'"></span>
-                                </td>
-                                <td class="px-3 py-4 text-sm text-gray-900">
-                                    <div class="max-w-full truncate" x-text="log.message || '-'" :title="log.message">
-                                    </div>
-                                </td>
-                                <td class="px-3 py-4 whitespace-nowrap text-sm font-medium">
-                                    <button @click="showLogDetail(log)"
-                                        class="text-blue-600 hover:text-blue-900">详情</button>
-                                </td>
-                            </tr>
-                        </template>
-                    </tbody>
-                </table>
-            </div>
-
-            <!-- Pagination -->
-            <div class="mt-6 flex flex-col sm:flex-row justify-between items-center gap-4">
-                <div class="text-sm text-gray-700">
-                    显示 <span x-text="(currentPage - 1) * pageSize + 1"></span> 到 <span
-                        x-text="Math.min(currentPage * pageSize, totalLogs)"></span> 条，共 <span
-                        x-text="totalLogs"></span> 条记录
-                </div>
-                <div class="flex space-x-2">
-                    <button @click="goToPage(currentPage - 1)" :disabled="currentPage === 1"
-                        class="px-3 py-1 border border-gray-300 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors duration-150">
-                        上一页
-                    </button>
-                    <span class="px-3 py-1 bg-blue-500 text-white rounded-xl" x-text="currentPage"></span>
-                    <button @click="goToPage(currentPage + 1)" :disabled="currentPage >= totalPages"
-                        class="px-3 py-1 border border-gray-300 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors duration-150">
-                        下一页
-                    </button>
-                </div>
-            </div>
-        </div>
+                    <div class="log-pager">
+                        <div class="log-pager-info tabular-nums">
+                            <span x-text="totalLogs ? ((currentPage - 1) * pageSize + 1) : 0"></span>–
+                            <span x-text="Math.min(currentPage * pageSize, totalLogs)"></span>
+                            / <span x-text="totalLogs"></span>
+                        </div>
+                        <div class="log-pager-actions">
+                            <button type="button" @click="goToPage(currentPage - 1)" :disabled="currentPage === 1"
+                                class="btn btn-secondary btn-sm">上一页</button>
+                            <span class="log-page-num tabular-nums" x-text="currentPage"></span>
+                            <button type="button" @click="goToPage(currentPage + 1)" :disabled="currentPage >= totalPages"
+                                class="btn btn-secondary btn-sm">下一页</button>
+                        </div>
+                    </div>
+                </section>
 
         <!-- Log Detail Modal -->
         <div x-show="showDetailModal" x-cloak @click.away="showDetailModal = false"
@@ -409,9 +264,13 @@
                 </div>
             </div>
         </div>
-    </div>
+
+            </main>
+        </div>
+    </div><!-- /.app-shell -->
 
     <script src="js/serilog.js"></script>
+    <script>AppShell.init("serilog");</script>
 </body>
 
 </html>

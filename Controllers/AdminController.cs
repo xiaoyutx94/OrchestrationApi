@@ -1115,12 +1115,26 @@ public class AdminController : ControllerBase
             var apiKey = apiKeys[0];
             var result = await _healthCheckService.CheckModelHealthAsync(groupId, apiKey, modelId);
 
+            // 400 多为探测格式不兼容，不代表密钥一定失效
+            var errorCategory = result.StatusCode switch
+            {
+                400 => "format_incompatible",
+                401 => "auth",
+                403 => "forbidden_or_quota",
+                404 => "model_unavailable",
+                429 => "rate_limit",
+                >= 500 => "upstream",
+                _ when !result.IsSuccess => "unknown",
+                _ => "ok"
+            };
+
             return Ok(new
             {
                 success = result.IsSuccess,
                 is_healthy = result.IsHealthy(),
                 status_code = result.StatusCode,
                 error_message = result.ErrorMessage,
+                error_category = errorCategory,
                 response_time_ms = result.ResponseTimeMs,
                 model_id = modelId,
                 group_id = groupId
@@ -1135,6 +1149,7 @@ public class AdminController : ControllerBase
                 is_healthy = false,
                 status_code = 500,
                 error_message = $"检测异常: {ex.Message}",
+                error_category = "exception",
                 response_time_ms = 0,
                 model_id = modelId,
                 group_id = groupId

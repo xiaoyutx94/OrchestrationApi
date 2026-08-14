@@ -76,6 +76,7 @@ document.getElementById('loginForm').addEventListener('submit', async function (
             // 保存token
             localStorage.setItem('authToken', data.token);
             localStorage.setItem('tokenExpires', data.expiresAt);
+            localStorage.setItem('username', username);
 
             // 稍微延迟一下再跳转，确保Cookie设置完成
             setTimeout(() => {
@@ -116,12 +117,14 @@ window.addEventListener('load', function () {
                 } else {
                     localStorage.removeItem('authToken');
                     localStorage.removeItem('tokenExpires');
+                    localStorage.removeItem('username');
                 }
             })
             .catch(() => {
                 // token无效，清除本地存储
                 localStorage.removeItem('authToken');
                 localStorage.removeItem('tokenExpires');
+                localStorage.removeItem('username');
             });
     }
 });
